@@ -1,21 +1,22 @@
 import SwiftUI
 
-/// Phase 1 placeholder. Phase 3 turns this into a `TabView` with
-/// Server / Appearance / Diagnostics tabs.
+/// Top-level Settings scene content. `Cmd+,` and the standard menu entry come
+/// from `Settings { SettingsView() }` declared in `JellySleeveApp`.
 struct SettingsView: View {
     var body: some View {
-        VStack(spacing: 12) {
-            Text("Settings")
-                .font(.title2)
-                .fontWeight(.semibold)
-            Text("Configuration arrives in Fase 3.")
-                .foregroundStyle(.secondary)
+        TabView {
+            ServerTab()
+                .tabItem { Label("Server", systemImage: "server.rack") }
+            AppearanceTab()
+                .tabItem { Label("Appearance", systemImage: "paintpalette") }
+            DiagnosticsTab()
+                .tabItem { Label("Diagnostics", systemImage: "ladybug") }
         }
-        .frame(width: 420, height: 240)
-        .padding()
+        .frame(width: 520, height: 420)
     }
 }
 
 #Preview {
     SettingsView()
+        .environment(SettingsStore())
 }
