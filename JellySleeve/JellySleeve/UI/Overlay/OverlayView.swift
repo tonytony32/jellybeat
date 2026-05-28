@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Root view rendered inside the borderless `NSWindow` created by
@@ -8,16 +9,36 @@ import SwiftUI
 struct OverlayView: View {
     @Environment(PlayerStore.self) private var player
     @Environment(ThemeRegistry.self) private var themes
+    @Environment(SettingsStore.self) private var settings
     @Environment(\.openSettings) private var openSettings
+
+    /// Drives the cross-fade from "invisible square" to "interactive overlay"
+    /// while in ambient idle mode. Lifted to this level so the GlassBackground
+    /// and contents fade together.
+    @State private var ambientHover: Bool = false
+
+    private var isAmbient: Bool {
+        if case .connected = player.connectionState, player.currentTrack == nil {
+            return true
+        }
+        return false
+    }
+
+    private var chromeOpacity: Double {
+        if !isAmbient { return 1.0 }
+        return (ambientHover || player.anticipating) ? 1.0 : 0.0
+    }
 
     var body: some View {
         ZStack {
             GlassBackground(material: themes.current.behavior.glassMaterial)
+                .opacity(chromeOpacity)
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             ConnectionDotView(state: player.connectionState)
                 .padding(8)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                .opacity(chromeOpacity)
                 .onTapGesture {
                     if case .error = player.connectionState {
                         openSettings()
@@ -35,6 +56,7 @@ struct OverlayView: View {
             )
         )
         .animation(.easeInOut(duration: 0.25), value: player.transientMessage)
+        .animation(.easeInOut(duration: 0.25), value: ambientHover)
     }
 
     @ViewBuilder
@@ -47,16 +69,22 @@ struct OverlayView: View {
         case .connecting, .connected:
             if let track = player.currentTrack {
                 themes.current.body(track: track, store: player)
-                    // Anchor identity on (theme, itemId) so SwiftUI preserves
-                    // internal @State (hover, cached NSImage) across the
-                    // continuous stream of TrackSnapshots a single song
-                    // produces. When the song or theme changes, the id
-                    // changes and the inner state resets, letting the
-                    // ArtworkView fade between the old and new artwork.
-                    .id("\(themes.current.id)_\(track.itemId)")
+                    // Anchor identity on the theme only. We deliberately do
+                    // NOT include track.itemId here: keeping the same
+                    // identity across track changes lets ArtworkView hold on
+                    // to the previous NSImage while fetching the new one, so
+                    // the user sees a clean cross-fade instead of a
+                    // placeholder flash between songs. Identity still flips
+                    // on theme change so the inner state resets cleanly when
+                    // the layout changes.
+                    .id(themes.current.id)
                     .transition(.opacity)
             } else {
-                NothingPlayingView()
+                NothingPlayingView(
+                    launchURL: settings.baseURL,
+                    isHovering: $ambientHover,
+                    onLaunch: { player.markAnticipating() }
+                )
             }
         }
     }
@@ -122,15 +150,38 @@ private struct TransientToastView: View {
     }
 }
 
+/// Ambient idle state: the window shrinks to artwork-size (see
+/// `AppDelegate.applyWindowSizeForCurrentState`), the contents are hidden,
+/// and a hover reveals a "Open Jellyfin" affordance. Tapping launches the
+/// configured Jellyfin URL via `NSWorkspace.open`, which on macOS picks the
+/// user's chosen handler — useful when the user has registered a Safari
+/// "Add to Dock" web app for the Jellyfin URL.
 private struct NothingPlayingView: View {
+    let launchURL: URL?
+    @Binding var isHovering: Bool
+    let onLaunch: () -> Void
+
     var body: some View {
-        VStack(spacing: 6) {
-            Image(systemName: "pause.circle")
-                .font(.system(size: 28, weight: .light))
-                .foregroundStyle(.tertiary)
-            Text("Nothing playing")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+        ZStack {
+            Color.clear.contentShape(Rectangle())
+
+            VStack(spacing: 8) {
+                Image(systemName: "play.circle")
+                    .font(.system(size: 30, weight: .light))
+                Text("Open Jellyfin")
+                    .font(.caption)
+            }
+            .foregroundStyle(.secondary)
+            .opacity(isHovering ? 0.85 : 0.0)
+            .scaleEffect(isHovering ? 1.0 : 0.95)
         }
+        .onHover { isHovering = $0 }
+        .onTapGesture {
+            if let launchURL {
+                ClientLauncher.openJellyfin(launchURL)
+                onLaunch()
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: isHovering)
     }
 }

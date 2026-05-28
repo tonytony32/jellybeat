@@ -23,7 +23,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let artworkProvider: ArtworkCacheProvider
 
     private var poller: PlaybackPoller?
+    private var socketClient: JellyfinSocketClient?
+    private var socketStateTask: Task<Void, Never>?
+    private var socketFailureStreak: Int = 0
     private var currentClient: JellyfinClient?
+    /// Once we've fallen back to polling we stop trying to revive the socket
+    /// for this configuration. A reconfigure (new baseURL / user / key) or a
+    /// relaunch resets it.
+    private static let socketMaxConsecutiveFailures = 3
 
     private var overlayWindow: NSWindow?
     private var sleepWakeObservers: [NSObjectProtocol] = []
@@ -34,6 +41,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// snap apply, restore on launch). Used to suppress feedback into
     /// `windowDidMove` so we don't try to snap something we just snapped.
     private var suppressMoveCallback: Bool = false
+    /// Tracks whether the window currently shows the ambient (artwork-sized)
+    /// or the full-layout footprint. Lets us compute the correct screen
+    /// origin when transitioning between the two modes.
+    private var windowIsAmbient: Bool = false
 
     override init() {
         self.settings = SettingsStore()
@@ -52,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         watchSettingsForReconfiguration()
         watchThemeForWindowResize()
         watchAppearanceSettings()
+        watchPlayerForAmbientMode()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -82,8 +94,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    /// Reconfigure the polling stack from current settings. Safe to call
-    /// repeatedly; tears down the previous client/cache/poller if any.
+    /// Reconfigure the playback feed (WebSocket preferred, polling fallback)
+    /// from the current settings. Safe to call repeatedly; tears down any
+    /// previous stack first.
     func startPollingIfPossible() {
         stopPolling()
         guard let config = settings.jellyfinConfiguration else {
@@ -94,28 +107,98 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let client = JellyfinClient(configuration: config)
         let cache = ArtworkCache(client: client)
         let poller = PlaybackPoller(store: player)
+        let socket = JellyfinSocketClient(
+            configuration: config,
+            deviceId: settings.deviceId,
+            userId: config.userId,
+            store: player
+        )
+
         self.currentClient = client
         self.artworkProvider.cache = cache
         self.poller = poller
+        self.socketClient = socket
+        self.socketFailureStreak = 0
         player.configure(client: client, poller: poller)
+        player.updateConnection(.connecting)
 
+        // Drive the swap-to-polling decision off the socket's state stream.
+        socketStateTask?.cancel()
+        socketStateTask = Task { [weak self] in
+            await self?.observeSocketStates(socket)
+        }
+
+        Task {
+            await socket.start()
+        }
+    }
+
+    func stopPolling() {
+        let oldPoller = poller
+        let oldSocket = socketClient
+        poller = nil
+        socketClient = nil
+        currentClient = nil
+        artworkProvider.cache = nil
+        socketStateTask?.cancel()
+        socketStateTask = nil
+        player.configure(client: nil, poller: nil)
+        if let oldPoller {
+            Task { await oldPoller.stop() }
+        }
+        if let oldSocket {
+            Task { await oldSocket.stop() }
+        }
+    }
+
+    /// Reacts to socket state transitions:
+    ///  - `.connected` → make sure the poller is stopped (server is pushing).
+    ///  - `.failed`    → increment the streak; if we hit the cap, hand over
+    ///                   to the polling poller permanently for this config.
+    private func observeSocketStates(_ socket: JellyfinSocketClient) async {
+        for await state in socket.stateStream {
+            guard !Task.isCancelled else { return }
+            switch state {
+            case .connecting, .idle:
+                continue
+            case .connected:
+                socketFailureStreak = 0
+                if let poller {
+                    Self.logger.notice("WebSocket up; pausing polling fallback.")
+                    Task { await poller.stop() }
+                }
+            case .failed(let message):
+                socketFailureStreak += 1
+                Self.logger.error("WebSocket failed (\(self.socketFailureStreak, privacy: .public)/\(Self.socketMaxConsecutiveFailures, privacy: .public)): \(message, privacy: .public)")
+                if socketFailureStreak >= Self.socketMaxConsecutiveFailures {
+                    Self.logger.notice("WebSocket gave up after \(self.socketFailureStreak, privacy: .public) failures; switching to polling.")
+                    Task { [socket] in await socket.stop() }
+                    startPollerFallback()
+                    return
+                } else {
+                    // Retry the socket with a short backoff before giving up.
+                    Task { [weak self, socket] in
+                        try? await Task.sleep(nanoseconds: 2_000_000_000)
+                        guard !Task.isCancelled, let self else { return }
+                        if self.socketClient === socket {
+                            await socket.start()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func startPollerFallback() {
+        guard let client = currentClient,
+              let config = settings.jellyfinConfiguration,
+              let poller else { return }
         Task { [poller, settings] in
             await poller.start(
                 client: client,
                 userId: config.userId,
                 baseDelay: settings.refreshRate
             )
-        }
-    }
-
-    func stopPolling() {
-        let oldPoller = poller
-        poller = nil
-        currentClient = nil
-        artworkProvider.cache = nil
-        player.configure(client: nil, poller: nil)
-        if let oldPoller {
-            Task { await oldPoller.stop() }
         }
     }
 
@@ -250,8 +333,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // window size to themes.current.layout.windowSize.
         let watcher: @MainActor () -> Void = { [weak self] in
             guard let self else { return }
-            let size = self.themes.current.layout.windowSize
-            self.resizeOverlayWindow(to: size)
+            self.applyWindowSizeForCurrentState()
             self.scheduleThemeReevaluation()
         }
         watcher()
@@ -265,6 +347,99 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.watchThemeForWindowResize()
             }
         }
+    }
+
+    /// Shrink the overlay to artwork-size when the server is reachable but
+    /// nothing is playing, so the floating window stays out of the way until
+    /// the user wants it. Restores full layout once a track starts.
+    private func watchPlayerForAmbientMode() {
+        withObservationTracking {
+            _ = player.connectionState
+            _ = player.currentTrack
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.applyWindowSizeForCurrentState()
+                self?.watchPlayerForAmbientMode()
+            }
+        }
+    }
+
+    private var isInAmbientMode: Bool {
+        if case .connected = player.connectionState, player.currentTrack == nil {
+            return true
+        }
+        return false
+    }
+
+    /// Resize and reposition the overlay so the artwork pixels never move
+    /// across transitions (theme change, full → ambient, ambient → full).
+    ///
+    /// The strategy: figure out where the artwork is on screen in the
+    /// current mode, then place the next window so the artwork lands on the
+    /// exact same pixel.
+    private func applyWindowSizeForCurrentState() {
+        guard let window = overlayWindow else { return }
+        let theme = themes.current
+        let targetAmbient = isInAmbientMode && theme.artworkFrame != nil
+
+        // Where is the artwork on screen right now?
+        let artworkScreenOrigin: CGPoint = {
+            if windowIsAmbient {
+                // The ambient window IS the artwork.
+                return window.frame.origin
+            } else if let art = theme.artworkFrame {
+                return CGPoint(
+                    x: window.frame.origin.x + art.minX,
+                    y: window.frame.origin.y + art.minY
+                )
+            } else {
+                // No artwork in this theme (Minim). Use the window centre as
+                // a stable anchor instead.
+                return CGPoint(
+                    x: window.frame.midX,
+                    y: window.frame.midY
+                )
+            }
+        }()
+
+        // Choose next size + origin so the artwork lands at the same screen
+        // position.
+        let nextSize: CGSize
+        var nextOrigin: CGPoint
+
+        if targetAmbient, let art = theme.artworkFrame {
+            nextSize = art.size
+            nextOrigin = artworkScreenOrigin
+        } else if let art = theme.artworkFrame {
+            nextSize = theme.layout.windowSize
+            nextOrigin = CGPoint(
+                x: artworkScreenOrigin.x - art.minX,
+                y: artworkScreenOrigin.y - art.minY
+            )
+        } else {
+            // Minim has no artwork — keep centred at the same point.
+            nextSize = theme.layout.windowSize
+            nextOrigin = CGPoint(
+                x: artworkScreenOrigin.x - nextSize.width / 2,
+                y: artworkScreenOrigin.y - nextSize.height / 2
+            )
+        }
+
+        // Clamp inside the visibleFrame so we never end up off-screen.
+        if let screen = window.screen ?? NSScreen.main {
+            let visible = screen.visibleFrame
+            nextOrigin.x = min(max(visible.minX, nextOrigin.x),
+                               visible.maxX - nextSize.width)
+            nextOrigin.y = min(max(visible.minY, nextOrigin.y),
+                               visible.maxY - nextSize.height)
+        }
+
+        suppressMoveCallback = true
+        window.setFrame(NSRect(origin: nextOrigin, size: nextSize),
+                        display: true,
+                        animate: true)
+        suppressMoveCallback = false
+        windowIsAmbient = targetAmbient
     }
 
     private func resizeOverlayWindow(to size: CGSize) {
@@ -308,15 +483,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Poller helpers
 
     private func pausePoller(reason: String) {
-        guard let poller else { return }
-        Self.logger.notice("Pause poller (\(reason, privacy: .public))")
-        Task { await poller.pause() }
+        if let poller {
+            Self.logger.notice("Pause poller (\(reason, privacy: .public))")
+            Task { await poller.pause() }
+        }
+        if let socket = socketClient {
+            Self.logger.notice("Stop socket (\(reason, privacy: .public))")
+            Task { await socket.stop() }
+        }
     }
 
     private func resumePollerIfPaused(reason: String) {
-        guard let poller else { return }
-        Self.logger.notice("Resume poller (\(reason, privacy: .public))")
-        Task { await poller.resume() }
+        if let poller {
+            Self.logger.notice("Resume poller (\(reason, privacy: .public))")
+            Task { await poller.resume() }
+        }
+        if let socket = socketClient {
+            Self.logger.notice("Reconnect socket (\(reason, privacy: .public))")
+            Task { await socket.start() }
+        }
     }
 
     // MARK: - Window setup

@@ -35,11 +35,13 @@ struct ControlsView: View {
             )
             controlButton(systemName: "forward.fill", action: .next)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.horizontal, behavior.controlsHasBackground ? 12 : 0)
+        .padding(.vertical, behavior.controlsHasBackground ? 6 : 0)
         .background {
-            Capsule().fill(.ultraThinMaterial)
-                .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 1)
+            if behavior.controlsHasBackground {
+                Capsule().fill(.ultraThinMaterial)
+                    .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 1)
+            }
         }
         .opacity(opacity)
         .allowsHitTesting(opacity > 0)
@@ -59,6 +61,11 @@ struct ControlsView: View {
         emphasised: Bool = false
     ) -> some View {
         Button {
+            // The store's sendCommand already drops repeats while a command
+            // is in flight, so we just no-op here instead of visually
+            // disabling the button (which used to dim it to 0.45 and felt
+            // like a "lost click").
+            guard !isCommandInFlight else { return }
             self.action(action)
         } label: {
             Image(systemName: systemName)
@@ -67,8 +74,6 @@ struct ControlsView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(action.accessibilityLabel)
-        .disabled(isCommandInFlight)
-        .opacity(isCommandInFlight ? 0.45 : 1.0)
         .scaleEffect(hoveredAction == action ? 1.12 : 1.0)
         .onHover { hovering in
             hoveredAction = hovering ? action : nil

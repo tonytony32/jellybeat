@@ -44,6 +44,12 @@ final class PlayerStore {
     /// Short user-facing message rendered as an overlay toast for ~2 s.
     var transientMessage: String? = nil
 
+    /// Raised when the user clicks the ambient overlay to launch their
+    /// Jellyfin client. Keeps the overlay chrome visible (no auto-fade back
+    /// to invisible) while we wait for a track to start, since that latency
+    /// can be a few seconds. Auto-clears after 30 s or when a track lands.
+    var anticipating: Bool = false
+
     // MARK: - Wired in by AppDelegate
 
     private var client: JellyfinClient?
@@ -53,6 +59,19 @@ final class PlayerStore {
 
     private var transientTask: Task<Void, Never>?
     private var clearTrackTask: Task<Void, Never>?
+    private var anticipatingTask: Task<Void, Never>?
+    /// Timestamp of the last command we issued. Used to suppress poll-driven
+    /// `isPaused` updates briefly so an optimistic toggle doesn't snap back
+    /// before the server's round-trip with the client has completed.
+    private var lastCommandAt: Date?
+    /// Window during which we ignore the poll's `isPaused` value because the
+    /// user just clicked play/pause and our optimistic flip is what they
+    /// actually want to see (vs the stale value the server has not yet been
+    /// notified of by the client). 1.5 s matches the worst-case round trip
+    /// for the web client to receive the WebSocket push, apply it, and report
+    /// the new state back to the server in time for the next `/Sessions`
+    /// reply.
+    private static let optimisticPlayPauseWindow: TimeInterval = 1.5
     /// How long to wait before clearing `currentTrack` when a poll reports no
     /// active track. Smooths over the brief gap between songs while the web
     /// player loads the next one.
@@ -83,7 +102,15 @@ final class PlayerStore {
         sessions: [SessionSummary]
     ) {
         self.connectionState = connectionState
-        self.isPaused = isPaused
+        // Optimistic-update protection: if a command was issued in the last
+        // 1.5 s, ignore the poll's `isPaused` so the local optimistic toggle
+        // stays put until the server has confirmed.
+        if let lastCommandAt,
+           Date().timeIntervalSince(lastCommandAt) < Self.optimisticPlayPauseWindow {
+            // skip
+        } else {
+            self.isPaused = isPaused
+        }
         self.availableSessions = sessions
 
         // Track transition smoothing: a new track cancels any pending clear
@@ -95,6 +122,9 @@ final class PlayerStore {
             clearTrackTask?.cancel()
             clearTrackTask = nil
             currentTrack = track
+            // Music arrived — drop the "expecting music" hint.
+            anticipating = false
+            anticipatingTask?.cancel()
         } else if currentTrack != nil {
             clearTrackTask?.cancel()
             clearTrackTask = Task { @MainActor [weak self] in
@@ -121,9 +151,79 @@ final class PlayerStore {
         }
     }
 
+    /// Apply a fresh `[Session]` from any source (polling or WebSocket).
+    /// Encapsulates the active-session heuristic from plan §4 (points 1-4)
+    /// plus snapshot building so consumers don't duplicate it.
+    func ingest(sessions: [Session], userId: String) {
+        let mine = sessions.filter { $0.userId == userId && $0.nowPlayingItem != nil }
+
+        let pick: Session?
+        if let manual = selectedSessionId,
+           let match = mine.first(where: { $0.id == manual }) {
+            pick = match
+        } else {
+            pick = mine.max(by: { lhs, rhs in
+                (lhs.lastActivityDate ?? .distantPast) < (rhs.lastActivityDate ?? .distantPast)
+            })
+        }
+
+        let snapshot = pick.flatMap { Self.makeSnapshot(from: $0) }
+        let pausedFromServer = pick?.playState?.isPaused ?? false
+        let summaries = Self.summaries(of: sessions, userId: userId)
+
+        apply(
+            connectionState: .connected,
+            track: snapshot,
+            isPaused: pausedFromServer,
+            sessions: summaries
+        )
+    }
+
+    private static func makeSnapshot(from session: Session) -> TrackSnapshot? {
+        guard let item = session.nowPlayingItem else { return nil }
+        let artist = item.albumArtist
+            ?? item.artists?.joined(separator: ", ")
+            ?? "Unknown artist"
+        let runtimeSeconds = Double(item.runTimeTicks ?? 0) / 10_000_000
+        let positionSeconds = Double(session.playState?.positionTicks ?? 0) / 10_000_000
+        return TrackSnapshot(
+            itemId: item.id,
+            imageTag: item.imageTags?.primary,
+            title: item.name,
+            artist: artist,
+            album: item.album ?? "",
+            runtime: .seconds(runtimeSeconds),
+            position: .seconds(positionSeconds),
+            sessionId: session.id
+        )
+    }
+
+    private static func summaries(of sessions: [Session], userId: String) -> [SessionSummary] {
+        sessions
+            .filter { $0.userId == userId }
+            .map {
+                SessionSummary(
+                    id: $0.id,
+                    client: $0.client,
+                    deviceName: $0.deviceName,
+                    lastActivity: $0.lastActivityDate,
+                    hasNowPlaying: $0.nowPlayingItem != nil
+                )
+            }
+            .sorted(by: { lhs, rhs in
+                if lhs.hasNowPlaying != rhs.hasNowPlaying { return lhs.hasNowPlaying }
+                return (lhs.lastActivity ?? .distantPast) > (rhs.lastActivity ?? .distantPast)
+            })
+    }
+
     // MARK: Commands
 
     func playPause() async {
+        // Optimistic UI: flip the icon at the press so latency is hidden.
+        // The server's eventual confirmation through the poll either ratifies
+        // (no visible change) or, if the command failed silently somewhere,
+        // the apply() guard expires after 1.5 s and the poll's value wins.
+        isPaused.toggle()
         await sendCommand(name: "play/pause") { client, sessionId in
             try await client.playPause(sessionId: sessionId)
         }
@@ -142,6 +242,18 @@ final class PlayerStore {
     }
 
     // MARK: Toast
+
+    /// Called when the user clicked the ambient overlay to launch their
+    /// Jellyfin client. Keeps the overlay visible for a 30 s grace window.
+    func markAnticipating() {
+        anticipating = true
+        anticipatingTask?.cancel()
+        anticipatingTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
+            guard !Task.isCancelled else { return }
+            self?.anticipating = false
+        }
+    }
 
     func showTransient(_ message: String) {
         transientMessage = message
@@ -173,6 +285,7 @@ final class PlayerStore {
         }
 
         isCommandInFlight = true
+        lastCommandAt = Date()
         let startNanos = DispatchTime.now().uptimeNanoseconds
 
         do {

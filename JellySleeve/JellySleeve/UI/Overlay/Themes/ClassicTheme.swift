@@ -27,6 +27,7 @@ struct ClassicTheme: OverlayTheme {
 
     nonisolated let behavior = BehaviorSpec(
         controlsAlwaysVisible: true,
+        controlsHasBackground: false,
         glassMaterial: .hudWindow,
         shadowOpacity: 0.35
     )

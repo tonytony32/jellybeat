@@ -26,6 +26,7 @@ struct AeroTheme: OverlayTheme {
 
     nonisolated let behavior = BehaviorSpec(
         controlsAlwaysVisible: false,
+        controlsHasBackground: true,
         glassMaterial: .underWindowBackground,
         shadowOpacity: 0.45
     )

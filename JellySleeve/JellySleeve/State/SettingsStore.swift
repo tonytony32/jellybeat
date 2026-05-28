@@ -232,6 +232,22 @@ final class SettingsStore {
     private static func positionKey(for displayID: UInt32) -> String {
         "settings.overlayPosition.\(displayID)"
     }
+
+    // MARK: - Device identifier (for WebSocket subscription)
+
+    /// Stable UUID that identifies this JellySleeve install to the Jellyfin
+    /// server. Required as a query parameter on `/socket` so the server can
+    /// track our connection. Generated lazily on first use and persisted.
+    var deviceId: String {
+        if let stored = UserDefaults.standard.string(forKey: Self.deviceIdKey) {
+            return stored
+        }
+        let fresh = UUID().uuidString
+        UserDefaults.standard.set(fresh, forKey: Self.deviceIdKey)
+        return fresh
+    }
+
+    private static let deviceIdKey = "settings.deviceId"
 }
 
 /// Cross-theme overlay window placement. Persisted in `SettingsStore`.

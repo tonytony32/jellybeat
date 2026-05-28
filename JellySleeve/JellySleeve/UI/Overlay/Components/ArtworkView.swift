@@ -12,6 +12,7 @@ struct ArtworkView: View {
     let shadowOpacity: Double
 
     @Environment(ArtworkCacheProvider.self) private var provider
+    @Environment(SettingsStore.self) private var settings
     @State private var image: NSImage?
     @State private var isLoading: Bool = false
 
@@ -53,6 +54,14 @@ struct ArtworkView: View {
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .shadow(color: .black.opacity(shadowOpacity), radius: 9, x: 0, y: 4)
         .accessibilityLabel(String(localized: "Album artwork"))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint(String(localized: "Double-click to open the Jellyfin client"))
+        .help(String(localized: "Double-click to open Jellyfin"))
+        .onTapGesture(count: 2) {
+            if let url = settings.baseURL {
+                ClientLauncher.openJellyfin(url)
+            }
+        }
         .task(id: LoadKey(itemId: itemId, tag: imageTag, cacheReady: provider.cache != nil)) {
             await loadImage()
         }
@@ -62,6 +71,10 @@ struct ArtworkView: View {
 
     private func loadImage() async {
         guard let cache = provider.cache else { return }
+        // Show a spinner only on the very first load. On a track change we
+        // keep the previous image visible until the new one arrives so the
+        // SwiftUI animation can cross-fade between them — no grey placeholder
+        // flash in between.
         if image == nil { isLoading = true }
         if let data = await cache.data(forItemId: itemId, tag: imageTag) {
             image = NSImage(data: data)

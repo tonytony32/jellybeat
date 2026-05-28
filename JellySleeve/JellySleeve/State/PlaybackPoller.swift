@@ -124,17 +124,8 @@ actor PlaybackPoller {
     private func tick(client: JellyfinClient, userId: String) async -> TickOutcome {
         do {
             let sessions = try await client.fetchSessions()
-            let pick = await selectActiveSession(from: sessions, userId: userId)
-            let snapshot = pick.flatMap { Self.makeSnapshot(from: $0) }
-            let isPaused = pick?.playState?.isPaused ?? false
-            let summaries = Self.summaries(of: sessions, userId: userId)
             await MainActor.run {
-                store.apply(
-                    connectionState: .connected,
-                    track: snapshot,
-                    isPaused: isPaused,
-                    sessions: summaries
-                )
+                store.ingest(sessions: sessions, userId: userId)
             }
             return .ok
         } catch NetworkError.unauthorized {
@@ -149,61 +140,6 @@ actor PlaybackPoller {
             Self.logger.error("Unexpected poll error: \(String(describing: error), privacy: .public)")
             return .transient
         }
-    }
-
-    /// Pick the session this user is playing on, honouring any manual
-    /// override. Implements plan §4 points 1-4.
-    private func selectActiveSession(
-        from sessions: [Session],
-        userId: String
-    ) async -> Session? {
-        let mine = sessions.filter { $0.userId == userId && $0.nowPlayingItem != nil }
-        guard !mine.isEmpty else { return nil }
-
-        let manualPick = await MainActor.run { store.selectedSessionId }
-        if let manualPick, let match = mine.first(where: { $0.id == manualPick }) {
-            return match
-        }
-        return mine.max(by: { lhs, rhs in
-            (lhs.lastActivityDate ?? .distantPast) < (rhs.lastActivityDate ?? .distantPast)
-        })
-    }
-
-    private static func makeSnapshot(from session: Session) -> TrackSnapshot? {
-        guard let item = session.nowPlayingItem else { return nil }
-        let artist = item.albumArtist
-            ?? item.artists?.joined(separator: ", ")
-            ?? "Unknown artist"
-        let runtimeSeconds = Double(item.runTimeTicks ?? 0) / 10_000_000
-        let positionSeconds = Double(session.playState?.positionTicks ?? 0) / 10_000_000
-        return TrackSnapshot(
-            itemId: item.id,
-            imageTag: item.imageTags?.primary,
-            title: item.name,
-            artist: artist,
-            album: item.album ?? "",
-            runtime: .seconds(runtimeSeconds),
-            position: .seconds(positionSeconds),
-            sessionId: session.id
-        )
-    }
-
-    private static func summaries(of sessions: [Session], userId: String) -> [SessionSummary] {
-        sessions
-            .filter { $0.userId == userId }
-            .map {
-                SessionSummary(
-                    id: $0.id,
-                    client: $0.client,
-                    deviceName: $0.deviceName,
-                    lastActivity: $0.lastActivityDate,
-                    hasNowPlaying: $0.nowPlayingItem != nil
-                )
-            }
-            .sorted(by: { lhs, rhs in
-                if lhs.hasNowPlaying != rhs.hasNowPlaying { return lhs.hasNowPlaying }
-                return (lhs.lastActivity ?? .distantPast) > (rhs.lastActivity ?? .distantPast)
-            })
     }
 
     // MARK: - Backoff + sleep

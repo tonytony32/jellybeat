@@ -26,6 +26,7 @@ struct StackTheme: OverlayTheme {
 
     nonisolated let behavior = BehaviorSpec(
         controlsAlwaysVisible: true,
+        controlsHasBackground: false,
         glassMaterial: .popover,
         shadowOpacity: 0.30
     )

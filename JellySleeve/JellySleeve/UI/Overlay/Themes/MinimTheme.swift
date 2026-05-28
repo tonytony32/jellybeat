@@ -26,6 +26,7 @@ struct MinimTheme: OverlayTheme {
 
     nonisolated let behavior = BehaviorSpec(
         controlsAlwaysVisible: true,
+        controlsHasBackground: false,
         glassMaterial: .toolTip,
         shadowOpacity: 0.25
     )
