@@ -1,10 +1,18 @@
 import SwiftUI
 
-/// Hover-revealed transport controls. The actual command wiring lands in
-/// Fase 5; Fase 4 only provides the structural piece so themes can compose it.
+/// Hover-revealed transport controls. The actual command wiring is supplied
+/// by the enclosing theme via the `action` closure.
 struct ControlsView: View {
     enum Action: Hashable, Sendable {
         case previous, playPause, next
+
+        var accessibilityLabel: String {
+            switch self {
+            case .previous: return String(localized: "Previous track")
+            case .playPause: return String(localized: "Play or pause")
+            case .next: return String(localized: "Next track")
+            }
+        }
     }
 
     let isPaused: Bool
@@ -14,6 +22,8 @@ struct ControlsView: View {
     /// region acts as the trigger, not just the buttons themselves.
     let isVisible: Bool
     let action: @MainActor (Action) -> Void
+
+    @State private var hoveredAction: Action?
 
     var body: some View {
         HStack(spacing: 14) {
@@ -56,7 +66,14 @@ struct ControlsView: View {
                 .frame(width: emphasised ? 28 : 24, height: emphasised ? 28 : 24)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(action.accessibilityLabel)
         .disabled(isCommandInFlight)
-        .opacity(isCommandInFlight ? 0.5 : 1.0)
+        .opacity(isCommandInFlight ? 0.45 : 1.0)
+        .scaleEffect(hoveredAction == action ? 1.12 : 1.0)
+        .onHover { hovering in
+            hoveredAction = hovering ? action : nil
+        }
+        .animation(.spring(response: 0.22, dampingFraction: 0.65), value: hoveredAction)
+        .focusEffectDisabled()
     }
 }

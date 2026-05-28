@@ -60,6 +60,20 @@ final class SettingsStore {
         }
     }
 
+    // MARK: Appearance toggles (apply across themes)
+
+    var windowLevel: OverlayWindowLevel {
+        didSet {
+            UserDefaults.standard.set(windowLevel.rawValue, forKey: Keys.windowLevel)
+        }
+    }
+
+    var windowOpacity: Double {
+        didSet {
+            UserDefaults.standard.set(windowOpacity, forKey: Keys.windowOpacity)
+        }
+    }
+
     /// When true the API key is persisted in the Keychain instead of in the
     /// cleartext preferences plist. Flipping it migrates the current value
     /// between locations atomically.
@@ -123,6 +137,11 @@ final class SettingsStore {
 
         let storedRate = defaults.double(forKey: Keys.refreshRate)
         self.refreshRate = storedRate == 0 ? 1.5 : storedRate
+
+        self.windowLevel = OverlayWindowLevel(rawValue: defaults.string(forKey: Keys.windowLevel) ?? "")
+            ?? .alwaysOnTop
+        let storedOpacity = defaults.double(forKey: Keys.windowOpacity)
+        self.windowOpacity = storedOpacity == 0 ? 1.0 : storedOpacity
 
         // Decide the storage location for the API key.
         //
@@ -190,5 +209,44 @@ final class SettingsStore {
         static let useKeychain = "settings.useKeychain"
         /// UserDefaults slot for the API key when `useKeychain == false`.
         static let apiKey = "settings.apiKey"
+        static let windowLevel = "settings.windowLevel"
+        static let windowOpacity = "settings.windowOpacity"
+    }
+
+    // MARK: - Persisted overlay window position (per display)
+
+    /// Saved overlay origin keyed by `CGDirectDisplayID` so multi-monitor
+    /// setups remember a separate position per screen (plan §6 Fase 6).
+    func overlayPosition(forDisplay displayID: UInt32) -> CGPoint? {
+        let key = Self.positionKey(for: displayID)
+        guard let array = UserDefaults.standard.array(forKey: key) as? [Double],
+              array.count == 2 else { return nil }
+        return CGPoint(x: array[0], y: array[1])
+    }
+
+    func setOverlayPosition(_ point: CGPoint, forDisplay displayID: UInt32) {
+        let key = Self.positionKey(for: displayID)
+        UserDefaults.standard.set([Double(point.x), Double(point.y)], forKey: key)
+    }
+
+    private static func positionKey(for displayID: UInt32) -> String {
+        "settings.overlayPosition.\(displayID)"
+    }
+}
+
+/// Cross-theme overlay window placement. Persisted in `SettingsStore`.
+nonisolated enum OverlayWindowLevel: String, CaseIterable, Identifiable, Sendable {
+    case alwaysOnTop
+    case normal
+    case behind
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .alwaysOnTop: return "Always on top"
+        case .normal: return "Normal"
+        case .behind: return "Behind other windows"
+        }
     }
 }

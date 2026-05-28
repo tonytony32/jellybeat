@@ -27,9 +27,14 @@ final class ThemeRegistry {
     }
 
     init() {
-        // Phase 4 only ships ElegantTheme. The other four built-ins land in
-        // Phase 6 alongside the Appearance tab.
-        self.builtIn = [ElegantTheme()]
+        // Display order per plan §6 Fase 6: Elegant, Stack, Classic, Minim, Aero.
+        self.builtIn = [
+            ElegantTheme(),
+            StackTheme(),
+            ClassicTheme(),
+            MinimTheme(),
+            AeroTheme(),
+        ]
         let stored = UserDefaults.standard.string(forKey: Self.storageKey) ?? "elegant"
         self.selectedId = stored
     }

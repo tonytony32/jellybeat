@@ -13,6 +13,7 @@ struct ArtworkView: View {
 
     @Environment(ArtworkCacheProvider.self) private var provider
     @State private var image: NSImage?
+    @State private var isLoading: Bool = false
 
     /// Key that invalidates the load task whenever either the requested item
     /// or the availability of the cache changes. The `cacheReady` boolean is
@@ -37,25 +38,34 @@ struct ArtworkView: View {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(.quaternary)
                     .overlay {
-                        Image(systemName: "music.note")
-                            .font(.system(size: size * 0.3, weight: .light))
-                            .foregroundStyle(.tertiary)
+                        if isLoading {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "music.note")
+                                .font(.system(size: size * 0.3, weight: .light))
+                                .foregroundStyle(.tertiary)
+                        }
                     }
             }
         }
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .shadow(color: .black.opacity(shadowOpacity), radius: 6, x: 0, y: 2)
+        .shadow(color: .black.opacity(shadowOpacity), radius: 9, x: 0, y: 4)
+        .accessibilityLabel(String(localized: "Album artwork"))
         .task(id: LoadKey(itemId: itemId, tag: imageTag, cacheReady: provider.cache != nil)) {
             await loadImage()
         }
         .animation(.easeInOut(duration: 0.4), value: image)
+        .animation(.easeInOut(duration: 0.2), value: isLoading)
     }
 
     private func loadImage() async {
         guard let cache = provider.cache else { return }
+        if image == nil { isLoading = true }
         if let data = await cache.data(forItemId: itemId, tag: imageTag) {
             image = NSImage(data: data)
         }
+        isLoading = false
     }
 }

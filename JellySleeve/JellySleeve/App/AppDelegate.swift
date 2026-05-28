@@ -30,6 +30,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowVisibilityObservers: [NSObjectProtocol] = []
     private var settingsObservation: NSObjectProtocol?
     private var debouncedReconfigure: Task<Void, Never>?
+    /// True while we are programmatically moving the window (theme resize,
+    /// snap apply, restore on launch). Used to suppress feedback into
+    /// `windowDidMove` so we don't try to snap something we just snapped.
+    private var suppressMoveCallback: Bool = false
 
     override init() {
         self.settings = SettingsStore()
@@ -47,6 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startPollingIfPossible()
         watchSettingsForReconfiguration()
         watchThemeForWindowResize()
+        watchAppearanceSettings()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -202,6 +207,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func reconfigureFromSettings() {
+        // Apply cheap window-level/opacity changes immediately — they don't
+        // need a poller restart.
+        applyWindowSettings()
+
         // Coalesce bursts. Capture the new desired config and compare with the
         // one currently in flight.
         guard let desired = settings.jellyfinConfiguration else {
@@ -216,6 +225,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         startPollingIfPossible()
+    }
+
+    /// Apply user-configurable window placement (level, opacity). Called both
+    /// after window creation and on every settings change.
+    private func applyWindowSettings() {
+        guard let window = overlayWindow else { return }
+        switch settings.windowLevel {
+        case .alwaysOnTop:
+            window.level = .floating
+        case .normal:
+            window.level = .normal
+        case .behind:
+            // Below normal windows but above the desktop icons.
+            window.level = NSWindow.Level(
+                Int(CGWindowLevelForKey(.desktopIconWindow))
+            )
+        }
+        window.alphaValue = CGFloat(settings.windowOpacity)
     }
 
     private func watchThemeForWindowResize() {
@@ -243,12 +270,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func resizeOverlayWindow(to size: CGSize) {
         guard let window = overlayWindow else { return }
         let current = window.frame
-        let newOrigin = NSPoint(
+        var newOrigin = NSPoint(
             x: current.midX - size.width / 2,
             y: current.midY - size.height / 2
         )
-        let newFrame = NSRect(origin: newOrigin, size: size)
-        window.setFrame(newFrame, display: true, animate: true)
+        let proposedFrame = NSRect(origin: newOrigin, size: size)
+        // Clamp inside the screen's visibleFrame so the new layout never lands
+        // partially off-screen. Plan §6 Fase 6 / risk table.
+        if let screen = window.screen ?? NSScreen.main {
+            let visible = screen.visibleFrame
+            newOrigin.x = min(max(visible.minX, newOrigin.x),
+                              visible.maxX - size.width)
+            newOrigin.y = min(max(visible.minY, newOrigin.y),
+                              visible.maxY - size.height)
+        }
+        let clamped = NSRect(origin: newOrigin, size: proposedFrame.size)
+        suppressMoveCallback = true
+        window.setFrame(clamped, display: true, animate: true)
+        suppressMoveCallback = false
+    }
+
+    /// Observe the appearance-related properties on `SettingsStore` directly
+    /// (without going through the debounced UserDefaults notification) so
+    /// dragging the opacity slider updates the window in real time.
+    private func watchAppearanceSettings() {
+        withObservationTracking {
+            _ = settings.windowOpacity
+            _ = settings.windowLevel
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.applyWindowSettings()
+                self?.watchAppearanceSettings()
+            }
+        }
     }
 
     // MARK: - Poller helpers
@@ -300,7 +354,77 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         window.center()
         window.makeKeyAndOrderFront(nil)
+        window.delegate = self
         observeWindowVisibility(window)
         overlayWindow = window
+        applyWindowSettings()
+        restoreSavedPosition(for: window)
+    }
+
+    // MARK: - Position persistence + edge snap
+
+    private func restoreSavedPosition(for window: NSWindow) {
+        guard let screen = window.screen,
+              let displayID = Self.displayID(of: screen),
+              let saved = settings.overlayPosition(forDisplay: displayID) else {
+            return
+        }
+        // Clamp against the current visibleFrame in case the screen layout
+        // changed since the saved position was written.
+        let size = window.frame.size
+        let visible = screen.visibleFrame
+        let clampedX = min(max(visible.minX, saved.x), visible.maxX - size.width)
+        let clampedY = min(max(visible.minY, saved.y), visible.maxY - size.height)
+        suppressMoveCallback = true
+        window.setFrameOrigin(NSPoint(x: clampedX, y: clampedY))
+        suppressMoveCallback = false
+    }
+
+    private static func displayID(of screen: NSScreen) -> UInt32? {
+        let key = NSDeviceDescriptionKey("NSScreenNumber")
+        return (screen.deviceDescription[key] as? NSNumber)?.uint32Value
+    }
+
+    /// Snap to corners and edges within 40pt of the current screen's
+    /// `visibleFrame`. Called from `windowDidMove`; the resulting
+    /// `setFrameOrigin` does not retrigger `windowDidMove` so there is no
+    /// loop.
+    private func snapToEdgesIfClose(_ window: NSWindow) {
+        guard let screen = window.screen else { return }
+        let visible = screen.visibleFrame
+        let threshold: CGFloat = 40
+        var origin = window.frame.origin
+        let size = window.frame.size
+
+        if abs(origin.x - visible.minX) < threshold {
+            origin.x = visible.minX
+        } else if abs(visible.maxX - (origin.x + size.width)) < threshold {
+            origin.x = visible.maxX - size.width
+        }
+
+        if abs(origin.y - visible.minY) < threshold {
+            origin.y = visible.minY
+        } else if abs(visible.maxY - (origin.y + size.height)) < threshold {
+            origin.y = visible.maxY - size.height
+        }
+
+        if origin != window.frame.origin {
+            suppressMoveCallback = true
+            window.setFrameOrigin(origin)
+            suppressMoveCallback = false
+        }
+    }
+}
+
+extension AppDelegate: NSWindowDelegate {
+    func windowDidMove(_ notification: Notification) {
+        guard !suppressMoveCallback,
+              let window = notification.object as? NSWindow,
+              window == overlayWindow else { return }
+        snapToEdgesIfClose(window)
+        if let screen = window.screen,
+           let displayID = Self.displayID(of: screen) {
+            settings.setOverlayPosition(window.frame.origin, forDisplay: displayID)
+        }
     }
 }

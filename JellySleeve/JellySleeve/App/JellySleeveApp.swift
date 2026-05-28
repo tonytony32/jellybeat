@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @main
@@ -8,21 +9,39 @@ struct JellySleeveApp: App {
         Settings {
             SettingsView()
                 .environment(appDelegate.settings)
+                .environment(appDelegate.themes)
         }
 
         MenuBarExtra("JellySleeve", systemImage: "music.note") {
-            Button("Open Overlay") {
+            Button(String(localized: "Open Overlay")) {
                 appDelegate.showOverlay()
             }
             SettingsLink {
-                Text("Settings…")
+                Text(String(localized: "Settings…"))
             }
             .keyboardShortcut(",", modifiers: .command)
+            Button(String(localized: "About JellySleeve")) {
+                showAboutPanel()
+            }
             Divider()
-            Button("Quit") {
+            Button(String(localized: "Quit")) {
                 NSApplication.shared.terminate(nil)
             }
             .keyboardShortcut("q", modifiers: .command)
         }
+    }
+
+    private func showAboutPanel() {
+        let credits = NSAttributedString(
+            string: "Built independently for Jellyfin.\nVisual inspiration from Sleeve by Replay.",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11),
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ]
+        )
+        NSApp.orderFrontStandardAboutPanel(options: [
+            NSApplication.AboutPanelOptionKey.credits: credits,
+        ])
+        NSApp.activate(ignoringOtherApps: true)
     }
 }
