@@ -1,0 +1,6 @@
+{
+    "Id": "example-server-id-1234567890abcdef",
+    "ServerName": "JellyfinTestServer",
+    "Version": "10.10.3",
+    "OperatingSystem": "Linux"
+}

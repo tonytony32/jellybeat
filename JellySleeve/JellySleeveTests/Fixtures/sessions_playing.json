@@ -1,0 +1,32 @@
+[
+    {
+        "Id": "session-abc-123",
+        "UserId": "user-xyz-789",
+        "Client": "Jellyfin Web",
+        "DeviceName": "Test Browser",
+        "LastActivityDate": "2026-05-28T10:00:00.0000000Z",
+        "NowPlayingItem": {
+            "Id": "item-track-456",
+            "Name": "Test Track",
+            "Artists": ["Test Artist", "Featuring Artist"],
+            "AlbumArtist": "Test Artist",
+            "Album": "Test Album",
+            "RunTimeTicks": 1800000000,
+            "ImageTags": {
+                "Primary": "abc123def456"
+            }
+        },
+        "PlayState": {
+            "PositionTicks": 600000000,
+            "IsPaused": false,
+            "VolumeLevel": 80
+        }
+    },
+    {
+        "Id": "session-other-999",
+        "UserId": "user-xyz-789",
+        "Client": "Jellyfin Mobile",
+        "DeviceName": "iPhone",
+        "LastActivityDate": "2026-05-28T09:30:00Z"
+    }
+]
