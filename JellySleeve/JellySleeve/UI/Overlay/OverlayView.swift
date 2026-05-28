@@ -57,6 +57,7 @@ struct OverlayView: View {
         )
         .animation(.easeInOut(duration: 0.25), value: player.transientMessage)
         .animation(.easeInOut(duration: 0.25), value: ambientHover)
+        .animation(.spring(response: 0.25, dampingFraction: 0.7), value: player.commandFeedback)
     }
 
     @ViewBuilder

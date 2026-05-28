@@ -57,7 +57,8 @@ private struct AeroBody: View {
                     isPaused: store.isPaused,
                     isCommandInFlight: store.isCommandInFlight,
                     behavior: theme.behavior,
-                    isVisible: isHovering,
+                    isVisible: isHovering || store.commandFeedback != nil,
+                    flashedAction: store.commandFeedback,
                     action: { action in
                         Task { @MainActor in
                             switch action {

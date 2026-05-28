@@ -27,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var socketStateTask: Task<Void, Never>?
     private var socketFailureStreak: Int = 0
     private var currentClient: JellyfinClient?
+    private var mediaCenter: MediaCenterController?
     /// Once we've fallen back to polling we stop trying to revive the socket
     /// for this configuration. A reconfigure (new baseURL / user / key) or a
     /// relaunch resets it.
@@ -64,6 +65,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         watchThemeForWindowResize()
         watchAppearanceSettings()
         watchPlayerForAmbientMode()
+        activateMediaCenter()
+    }
+
+    private func activateMediaCenter() {
+        let controller = MediaCenterController(player: player, artworkProvider: artworkProvider)
+        controller.activate()
+        mediaCenter = controller
     }
 
     func applicationWillTerminate(_ notification: Notification) {

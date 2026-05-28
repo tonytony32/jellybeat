@@ -60,6 +60,7 @@ private struct StackBody: View {
                 isCommandInFlight: store.isCommandInFlight,
                 behavior: theme.behavior,
                 isVisible: true,
+                flashedAction: store.commandFeedback,
                 action: { action in
                     Task { @MainActor in
                         switch action {

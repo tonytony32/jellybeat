@@ -50,6 +50,11 @@ final class PlayerStore {
     /// can be a few seconds. Auto-clears after 30 s or when a track lands.
     var anticipating: Bool = false
 
+    /// Set briefly after a control action so the overlay can flash a large
+    /// SF Symbol confirming the dispatch — useful when the user pressed a
+    /// media key (F7/F8/F9) and the artwork/title hasn't updated yet.
+    var commandFeedback: ControlsView.Action? = nil
+
     // MARK: - Wired in by AppDelegate
 
     private var client: JellyfinClient?
@@ -60,6 +65,7 @@ final class PlayerStore {
     private var transientTask: Task<Void, Never>?
     private var clearTrackTask: Task<Void, Never>?
     private var anticipatingTask: Task<Void, Never>?
+    private var commandFeedbackTask: Task<Void, Never>?
     /// Timestamp of the last command we issued. Used to suppress poll-driven
     /// `isPaused` updates briefly so an optimistic toggle doesn't snap back
     /// before the server's round-trip with the client has completed.
@@ -224,20 +230,33 @@ final class PlayerStore {
         // (no visible change) or, if the command failed silently somewhere,
         // the apply() guard expires after 1.5 s and the poll's value wins.
         isPaused.toggle()
+        flashFeedback(.playPause)
         await sendCommand(name: "play/pause") { client, sessionId in
             try await client.playPause(sessionId: sessionId)
         }
     }
 
     func nextTrack() async {
+        flashFeedback(.next)
         await sendCommand(name: "next") { client, sessionId in
             try await client.nextTrack(sessionId: sessionId)
         }
     }
 
     func previousTrack() async {
+        flashFeedback(.previous)
         await sendCommand(name: "previous") { client, sessionId in
             try await client.previousTrack(sessionId: sessionId)
+        }
+    }
+
+    private func flashFeedback(_ action: ControlsView.Action) {
+        commandFeedback = action
+        commandFeedbackTask?.cancel()
+        commandFeedbackTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard !Task.isCancelled else { return }
+            self?.commandFeedback = nil
         }
     }
 

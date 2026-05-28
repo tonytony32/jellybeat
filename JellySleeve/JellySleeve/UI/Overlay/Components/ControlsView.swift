@@ -21,6 +21,10 @@ struct ControlsView: View {
     /// Driven by the enclosing container's hover state so the whole artwork
     /// region acts as the trigger, not just the buttons themselves.
     let isVisible: Bool
+    /// Recently-dispatched action, used to pulse the corresponding button so
+    /// media-key presses (F7/F8/F9) get a visible confirmation even when the
+    /// row was hover-hidden.
+    let flashedAction: Action?
     let action: @MainActor (Action) -> Void
 
     @State private var hoveredAction: Action?
@@ -74,11 +78,18 @@ struct ControlsView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(action.accessibilityLabel)
-        .scaleEffect(hoveredAction == action ? 1.12 : 1.0)
+        .scaleEffect(scale(for: action))
         .onHover { hovering in
             hoveredAction = hovering ? action : nil
         }
         .animation(.spring(response: 0.22, dampingFraction: 0.65), value: hoveredAction)
+        .animation(.spring(response: 0.25, dampingFraction: 0.55), value: flashedAction)
         .focusEffectDisabled()
+    }
+
+    private func scale(for action: Action) -> CGFloat {
+        if flashedAction == action { return 1.35 }
+        if hoveredAction == action { return 1.12 }
+        return 1.0
     }
 }
