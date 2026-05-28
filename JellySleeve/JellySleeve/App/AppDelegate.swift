@@ -92,6 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.currentClient = client
         self.artworkProvider.cache = cache
         self.poller = poller
+        player.configure(client: client, poller: poller)
 
         Task { [poller, settings] in
             await poller.start(
@@ -107,6 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         poller = nil
         currentClient = nil
         artworkProvider.cache = nil
+        player.configure(client: nil, poller: nil)
         if let oldPoller {
             Task { await oldPoller.stop() }
         }

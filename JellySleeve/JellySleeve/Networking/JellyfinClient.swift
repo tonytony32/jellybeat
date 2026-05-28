@@ -85,17 +85,20 @@ nonisolated struct JellyfinClient: Sendable {
     /// Fetch the primary artwork bytes for an item. The optional `tag` is the
     /// `ImageTags.Primary` field; including it lets us key the cache off the
     /// tag so server-side artwork changes propagate automatically (plan §4).
+    /// Fetch the album cover as PNG so there are no JPEG ringing artefacts
+    /// around lettering. `fillHeight=900` covers a 200pt artwork on a 3x
+    /// retina display with a comfortable downsampling margin. PNG output is
+    /// larger than a quality-95 JPEG but the disk cache amortises it.
     func fetchArtwork(
         itemId: String,
         tag: String?,
-        fillHeight: Int = 600,
-        quality: Int = 90
+        fillHeight: Int = 900
     ) async throws -> Data {
         var components = URLComponents()
         components.path = Endpoints.itemPrimaryImage(itemId: itemId)
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "fillHeight", value: "\(fillHeight)"),
-            URLQueryItem(name: "quality", value: "\(quality)"),
+            URLQueryItem(name: "format", value: "Png"),
         ]
         if let tag {
             queryItems.append(URLQueryItem(name: "tag", value: tag))

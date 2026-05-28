@@ -31,29 +31,54 @@ struct ElegantTheme: OverlayTheme {
     )
 
     func body(track: TrackSnapshot, store: PlayerStore) -> AnyView {
-        AnyView(
-            VStack(spacing: 10) {
-                ArtworkView(
-                    itemId: track.itemId,
-                    imageTag: track.imageTag,
-                    size: layout.artworkSize ?? 200,
-                    cornerRadius: 8,
-                    shadowOpacity: behavior.shadowOpacity
-                )
-                .overlay(alignment: .bottom) {
-                    ControlsView(
-                        isPaused: store.isPaused,
-                        isCommandInFlight: store.isCommandInFlight,
-                        behavior: behavior,
-                        action: { _ in /* Fase 5 */ }
-                    )
-                    .padding(.bottom, 6)
-                }
+        AnyView(ElegantBody(track: track, store: store, theme: self))
+    }
+}
 
-                TrackInfoView(track: track, typography: typography)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+/// Concrete `View` so we can keep `@State` (hover) and let SwiftUI handle the
+/// fade naturally; `OverlayTheme.body` returns an `AnyView` and can't host
+/// state directly.
+private struct ElegantBody: View {
+    let track: TrackSnapshot
+    let store: PlayerStore
+    let theme: ElegantTheme
+
+    @State private var isHovering = false
+
+    var body: some View {
+        VStack(spacing: 10) {
+            ArtworkView(
+                itemId: track.itemId,
+                imageTag: track.imageTag,
+                size: theme.layout.artworkSize ?? 200,
+                cornerRadius: 8,
+                shadowOpacity: theme.behavior.shadowOpacity
+            )
+            .overlay(alignment: .bottom) {
+                ControlsView(
+                    isPaused: store.isPaused,
+                    isCommandInFlight: store.isCommandInFlight,
+                    behavior: theme.behavior,
+                    isVisible: isHovering,
+                    action: { action in
+                        Task { @MainActor in
+                            switch action {
+                            case .previous: await store.previousTrack()
+                            case .playPause: await store.playPause()
+                            case .next: await store.nextTrack()
+                            }
+                        }
+                    }
+                )
+                .padding(.bottom, 6)
             }
-            .padding(layout.padding)
-        )
+            // Hover anywhere on the artwork region reveals the controls,
+            // not just the buttons themselves.
+            .onHover { isHovering = $0 }
+
+            TrackInfoView(track: track, typography: theme.typography)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(theme.layout.padding)
     }
 }

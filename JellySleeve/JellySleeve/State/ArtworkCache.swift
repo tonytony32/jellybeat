@@ -27,9 +27,12 @@ actor ArtworkCache {
         self.memoryCap = memoryCap
         let cacheRoot = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        // Versioned subdirectory so changes to the fetch parameters (image
+        // size, format) automatically invalidate the previously cached
+        // entries instead of serving the lower-quality images forever.
         self.directory = cacheRoot
             .appendingPathComponent("software.trypwood.jellysleeve", isDirectory: true)
-            .appendingPathComponent("artwork", isDirectory: true)
+            .appendingPathComponent("artwork_v3", isDirectory: true)
         try? FileManager.default.createDirectory(
             at: directory,
             withIntermediateDirectories: true
@@ -46,7 +49,7 @@ actor ArtworkCache {
             return cached
         }
 
-        let url = directory.appendingPathComponent("\(key).jpg")
+        let url = directory.appendingPathComponent("\(key).png")
         if let onDisk = try? Data(contentsOf: url) {
             store(key: key, data: onDisk)
             return onDisk

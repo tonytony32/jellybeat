@@ -10,9 +10,10 @@ struct ControlsView: View {
     let isPaused: Bool
     let isCommandInFlight: Bool
     let behavior: BehaviorSpec
+    /// Driven by the enclosing container's hover state so the whole artwork
+    /// region acts as the trigger, not just the buttons themselves.
+    let isVisible: Bool
     let action: @MainActor (Action) -> Void
-
-    @State private var isHovering: Bool = false
 
     var body: some View {
         HStack(spacing: 14) {
@@ -31,14 +32,14 @@ struct ControlsView: View {
                 .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 1)
         }
         .opacity(opacity)
-        .onHover { isHovering = $0 }
-        .animation(.easeInOut(duration: 0.2), value: isHovering)
+        .allowsHitTesting(opacity > 0)
+        .animation(.easeInOut(duration: 0.2), value: isVisible)
         .animation(.easeInOut(duration: 0.2), value: isPaused)
     }
 
     private var opacity: Double {
         if behavior.controlsAlwaysVisible { return 1.0 }
-        return isHovering ? 1.0 : 0.0
+        return isVisible ? 1.0 : 0.0
     }
 
     @ViewBuilder

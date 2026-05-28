@@ -29,6 +29,8 @@ struct ArtworkView: View {
             if let image {
                 Image(nsImage: image)
                     .resizable()
+                    .interpolation(.high)
+                    .antialiased(true)
                     .aspectRatio(contentMode: .fill)
                     .transition(.opacity)
             } else {

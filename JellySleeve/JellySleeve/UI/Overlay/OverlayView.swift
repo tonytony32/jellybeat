@@ -23,6 +23,10 @@ struct OverlayView: View {
                         openSettings()
                     }
                 }
+            TransientToastView(message: player.transientMessage)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .padding(.bottom, 8)
+                .allowsHitTesting(false)
         }
         .clipShape(
             RoundedRectangle(
@@ -30,6 +34,7 @@ struct OverlayView: View {
                 style: .continuous
             )
         )
+        .animation(.easeInOut(duration: 0.25), value: player.transientMessage)
     }
 
     @ViewBuilder
@@ -42,6 +47,13 @@ struct OverlayView: View {
         case .connecting, .connected:
             if let track = player.currentTrack {
                 themes.current.body(track: track, store: player)
+                    // Anchor identity on (theme, itemId) so SwiftUI preserves
+                    // internal @State (hover, cached NSImage) across the
+                    // continuous stream of TrackSnapshots a single song
+                    // produces. When the song or theme changes, the id
+                    // changes and the inner state resets, letting the
+                    // ArtworkView fade between the old and new artwork.
+                    .id("\(themes.current.id)_\(track.itemId)")
                     .transition(.opacity)
             } else {
                 NothingPlayingView()
@@ -87,6 +99,26 @@ private struct ErrorStateView: View {
                 .buttonStyle(.bordered)
         }
         .padding(16)
+    }
+}
+
+/// 2-second toast surfaced when a playback command fails (plan §6 Fase 5).
+private struct TransientToastView: View {
+    let message: String?
+
+    var body: some View {
+        if let message {
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background {
+                    Capsule().fill(.ultraThinMaterial)
+                        .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 1)
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
     }
 }
 
