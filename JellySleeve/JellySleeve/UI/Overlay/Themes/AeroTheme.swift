@@ -76,6 +76,12 @@ private struct AeroBody: View {
             TrackInfoView(track: track, typography: theme.typography)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .multilineTextAlignment(.center)
+
+            ProgressBarView(
+                position: track.position,
+                runtime: track.runtime,
+                isPaused: store.isPaused
+            )
         }
         .padding(theme.layout.padding)
     }

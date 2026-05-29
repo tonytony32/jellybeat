@@ -53,6 +53,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.themes = ThemeRegistry()
         self.artworkProvider = ArtworkCacheProvider()
         super.init()
+        // Tell macOS not to restore Settings between launches. Without this,
+        // closing the Settings window during one session causes it to spring
+        // back open the next time the app starts (SwiftUI's Settings scene
+        // participates in the system-wide Resume mechanism).
+        UserDefaults.standard.set(false, forKey: "NSQuitAlwaysKeepsWindows")
     }
 
     // MARK: - NSApplicationDelegate
@@ -66,6 +71,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         watchAppearanceSettings()
         watchPlayerForAmbientMode()
         activateMediaCenter()
+        // Close anything macOS Resume restored except the overlay AND the
+        // MenuBarExtra's internal NSStatusBarWindow (`StatusBar`/`Popover`
+        // class names) so we don't lose the menu-bar item.
+        closeRestoredScenesExceptOverlay()
+    }
+
+    private func closeRestoredScenesExceptOverlay() {
+        for window in NSApp.windows where window !== overlayWindow {
+            let cls = String(describing: type(of: window))
+            if cls.contains("StatusBar") || cls.contains("Popover") || cls.contains("MenuBar") {
+                continue
+            }
+            window.close()
+        }
     }
 
     private func activateMediaCenter() {
@@ -328,10 +347,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .normal:
             window.level = .normal
         case .behind:
-            // Below normal windows but above the desktop icons.
-            window.level = NSWindow.Level(
-                Int(CGWindowLevelForKey(.desktopIconWindow))
-            )
+            // One step below Normal — other apps cover us, but as soon as
+            // the foreground window goes away (Cmd+Tab elsewhere, app hide,
+            // Space change with no other windows on top) JellySleeve is
+            // clickable again. The previous desktopIconWindow level was too
+            // low — macOS routes clicks there to Finder.
+            window.level = NSWindow.Level(rawValue: NSWindow.Level.normal.rawValue - 1)
         }
         window.alphaValue = CGFloat(settings.windowOpacity)
     }
@@ -379,58 +400,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return false
     }
 
-    /// Resize and reposition the overlay so the artwork pixels never move
-    /// across transitions (theme change, full → ambient, ambient → full).
+    /// Resize and reposition the overlay across transitions (theme change,
+    /// full → ambient, ambient → full).
     ///
-    /// The strategy: figure out where the artwork is on screen in the
-    /// current mode, then place the next window so the artwork lands on the
-    /// exact same pixel.
+    /// Two anchoring strategies:
+    ///  - If the window is currently snapped to one of the four corners of
+    ///    the screen's visibleFrame, keep it pinned to that same corner with
+    ///    the new size. This trumps the artwork anchor below.
+    ///  - Otherwise, line the new window up so the artwork rectangle lands
+    ///    on the exact same screen pixels as before. Minim (no artwork)
+    ///    falls back to centring at the previous window centre.
     private func applyWindowSizeForCurrentState() {
         guard let window = overlayWindow else { return }
         let theme = themes.current
         let targetAmbient = isInAmbientMode && theme.artworkFrame != nil
 
-        // Where is the artwork on screen right now?
-        let artworkScreenOrigin: CGPoint = {
-            if windowIsAmbient {
-                // The ambient window IS the artwork.
-                return window.frame.origin
-            } else if let art = theme.artworkFrame {
-                return CGPoint(
-                    x: window.frame.origin.x + art.minX,
-                    y: window.frame.origin.y + art.minY
-                )
-            } else {
-                // No artwork in this theme (Minim). Use the window centre as
-                // a stable anchor instead.
-                return CGPoint(
-                    x: window.frame.midX,
-                    y: window.frame.midY
-                )
-            }
-        }()
-
-        // Choose next size + origin so the artwork lands at the same screen
-        // position.
+        // Decide next size.
         let nextSize: CGSize
-        var nextOrigin: CGPoint
-
         if targetAmbient, let art = theme.artworkFrame {
             nextSize = art.size
-            nextOrigin = artworkScreenOrigin
-        } else if let art = theme.artworkFrame {
-            nextSize = theme.layout.windowSize
-            nextOrigin = CGPoint(
-                x: artworkScreenOrigin.x - art.minX,
-                y: artworkScreenOrigin.y - art.minY
-            )
         } else {
-            // Minim has no artwork — keep centred at the same point.
             nextSize = theme.layout.windowSize
-            nextOrigin = CGPoint(
-                x: artworkScreenOrigin.x - nextSize.width / 2,
-                y: artworkScreenOrigin.y - nextSize.height / 2
-            )
+        }
+
+        // Decide next origin.
+        var nextOrigin: CGPoint
+        if let corner = currentSnapCorner(window: window),
+           let screen = window.screen ?? NSScreen.main {
+            // Preserve the snapped corner across resizes.
+            nextOrigin = origin(for: corner, size: nextSize, on: screen)
+        } else {
+            // Artwork-anchored repositioning.
+            let artworkScreenOrigin: CGPoint = {
+                if windowIsAmbient {
+                    return window.frame.origin
+                } else if let art = theme.artworkFrame {
+                    return CGPoint(
+                        x: window.frame.origin.x + art.minX,
+                        y: window.frame.origin.y + art.minY
+                    )
+                } else {
+                    return CGPoint(x: window.frame.midX, y: window.frame.midY)
+                }
+            }()
+
+            if targetAmbient {
+                nextOrigin = artworkScreenOrigin
+            } else if let art = theme.artworkFrame {
+                nextOrigin = CGPoint(
+                    x: artworkScreenOrigin.x - art.minX,
+                    y: artworkScreenOrigin.y - art.minY
+                )
+            } else {
+                nextOrigin = CGPoint(
+                    x: artworkScreenOrigin.x - nextSize.width / 2,
+                    y: artworkScreenOrigin.y - nextSize.height / 2
+                )
+            }
         }
 
         // Clamp inside the visibleFrame so we never end up off-screen.
@@ -520,7 +546,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             x: 0, y: 0,
             width: windowSize.width, height: windowSize.height
         )
-        let window = NSWindow(
+        let window = ClickableBorderlessWindow(
             contentRect: contentRect,
             styleMask: [.borderless, .fullSizeContentView],
             backing: .buffered,
@@ -531,6 +557,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.backgroundColor = .clear
         window.isOpaque = false
         window.hasShadow = true
+        // canJoinAllSpaces: visible in every Space.
+        // fullScreenAuxiliary: stays above apps in fullscreen.
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.isReleasedWhenClosed = false
 
@@ -578,6 +606,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return (screen.deviceDescription[key] as? NSNumber)?.uint32Value
     }
 
+    // MARK: - Snap corner detection
+
+    private enum SnapCorner: CaseIterable {
+        case topLeft, topRight, bottomLeft, bottomRight
+    }
+
+    /// Returns the corner the window is currently pinned against, if any.
+    /// Tolerates up to 6 pt drift so that a snap performed during a drag
+    /// (which uses the 40 pt threshold but does not produce sub-pixel
+    /// precision) still counts as snapped.
+    private func currentSnapCorner(window: NSWindow) -> SnapCorner? {
+        guard let screen = window.screen ?? NSScreen.main else { return nil }
+        let visible = screen.visibleFrame
+        let frame = window.frame
+        let threshold: CGFloat = 6
+
+        let onLeft = abs(frame.minX - visible.minX) <= threshold
+        let onRight = abs(frame.maxX - visible.maxX) <= threshold
+        let onBottom = abs(frame.minY - visible.minY) <= threshold
+        let onTop = abs(frame.maxY - visible.maxY) <= threshold
+
+        switch (onTop, onBottom, onLeft, onRight) {
+        case (true, _, true, _):   return .topLeft
+        case (true, _, _, true):   return .topRight
+        case (_, true, true, _):   return .bottomLeft
+        case (_, true, _, true):   return .bottomRight
+        default:                   return nil
+        }
+    }
+
+    private func origin(for corner: SnapCorner, size: CGSize, on screen: NSScreen) -> CGPoint {
+        let visible = screen.visibleFrame
+        switch corner {
+        case .topLeft:
+            return CGPoint(x: visible.minX, y: visible.maxY - size.height)
+        case .topRight:
+            return CGPoint(x: visible.maxX - size.width, y: visible.maxY - size.height)
+        case .bottomLeft:
+            return CGPoint(x: visible.minX, y: visible.minY)
+        case .bottomRight:
+            return CGPoint(x: visible.maxX - size.width, y: visible.minY)
+        }
+    }
+
     /// Snap to corners and edges within 40pt of the current screen's
     /// `visibleFrame`. Called from `windowDidMove`; the resulting
     /// `setFrameOrigin` does not retrigger `windowDidMove` so there is no
@@ -607,6 +679,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             suppressMoveCallback = false
         }
     }
+}
+
+/// Borderless NSWindow that overrides `canBecomeKey` so SwiftUI buttons
+/// still receive mouse events after the user swipes to another Space and
+/// back. Without this override, macOS sometimes leaves the borderless
+/// window's hit-testing in a state where clicks no longer register until
+/// the window is focused again — which never happens for a `.floating`
+/// window that can't become key.
+final class ClickableBorderlessWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
 }
 
 extension AppDelegate: NSWindowDelegate {

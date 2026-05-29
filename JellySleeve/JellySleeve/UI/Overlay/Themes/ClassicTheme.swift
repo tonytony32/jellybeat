@@ -55,6 +55,13 @@ private struct ClassicBody: View {
             VStack(alignment: .leading, spacing: 4) {
                 TrackInfoView(track: track, typography: theme.typography)
 
+                ProgressBarView(
+                    position: track.position,
+                    runtime: track.runtime,
+                    isPaused: store.isPaused
+                )
+                .padding(.top, 2)
+
                 Spacer(minLength: 0)
 
                 ControlsView(

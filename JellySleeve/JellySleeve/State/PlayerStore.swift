@@ -161,7 +161,27 @@ final class PlayerStore {
     /// Encapsulates the active-session heuristic from plan §4 (points 1-4)
     /// plus snapshot building so consumers don't duplicate it.
     func ingest(sessions: [Session], userId: String) {
-        let mine = sessions.filter { $0.userId == userId && $0.nowPlayingItem != nil }
+        // Filter for the user's sessions that look genuinely active.
+        //
+        // Jellyfin keeps a session record around for a while after the
+        // client disconnects — a Safari "Add to Dock" web app, in
+        // particular, doesn't gracefully tear down on close. The session
+        // keeps reporting the last `NowPlayingItem` until the server's own
+        // timeout fires (minutes). We approximate "still there" by checking
+        // `LastActivityDate`: an active web player checks in regularly, so
+        // anything older than ~10 s belongs to a disconnected client.
+        let now = Date()
+        let recencyThreshold: TimeInterval = 10
+        let mine = sessions.filter { session in
+            guard session.userId == userId, session.nowPlayingItem != nil else {
+                return false
+            }
+            if let last = session.lastActivityDate,
+               now.timeIntervalSince(last) > recencyThreshold {
+                return false
+            }
+            return true
+        }
 
         let pick: Session?
         if let manual = selectedSessionId,

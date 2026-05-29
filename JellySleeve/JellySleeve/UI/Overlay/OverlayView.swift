@@ -166,9 +166,12 @@ private struct NothingPlayingView: View {
         ZStack {
             Color.clear.contentShape(Rectangle())
 
-            VStack(spacing: 8) {
-                Image(systemName: "play.circle")
-                    .font(.system(size: 30, weight: .light))
+            VStack(spacing: 10) {
+                Image("JellyfinLogo")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 42, height: 42)
                 Text("Open Jellyfin")
                     .font(.caption)
             }
