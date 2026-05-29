@@ -692,9 +692,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 /// window's hit-testing in a state where clicks no longer register until
 /// the window is focused again — which never happens for a `.floating`
 /// window that can't become key.
+///
+/// `sendEvent` intercepts every mouse-down before it reaches any subview,
+/// so clicking on static text or any non-interactive area restores focus
+/// just as reliably as clicking on the artwork or the progress bar.
 final class ClickableBorderlessWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown {
+            NSApp.activate(ignoringOtherApps: true)
+            makeKey()
+        }
+        super.sendEvent(event)
+    }
 }
 
 extension AppDelegate: NSWindowDelegate {
