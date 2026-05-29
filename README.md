@@ -111,6 +111,19 @@ xcodebuild -project JellySleeve.xcodeproj -scheme JellySleeve \
 mapping, and the `X-Emby-Token` auth header. The WebSocket client and
 the SwiftUI layer aren't currently under test.
 
+## Support and maintenance
+
+JellySleeve is a personal hobby project. Use it as you would any other
+piece of MIT-licensed software: **best effort, no warranty, no SLA on
+issue triage or PR review.**
+
+- Bug reports and feature requests are welcome — see the templates in
+  [`.github/ISSUE_TEMPLATE/`](.github/ISSUE_TEMPLATE/).
+- Contributions: read [`CONTRIBUTING.md`](CONTRIBUTING.md). No CLA.
+- Maintenance policy: [`docs/MAINTENANCE.md`](docs/MAINTENANCE.md).
+- Security-sensitive reports go to email rather than a public issue —
+  see `CONTRIBUTING.md`.
+
 ## Acknowledgements
 
 Visual inspiration from [Sleeve by Replay][sleeve]; built independently
