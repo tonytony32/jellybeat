@@ -31,12 +31,15 @@ struct OverlayView: View {
 
     var body: some View {
         ZStack {
-            GlassBackground(material: themes.current.behavior.glassMaterial)
-                .opacity(chromeOpacity)
+            if themes.current.behavior.hasGlassBackground {
+                GlassBackground(material: themes.current.behavior.glassMaterial)
+                    .opacity(chromeOpacity)
+            }
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             ConnectionDotView(state: player.connectionState)
-                .padding(8)
+                .padding(.top, 14)
+                .padding(.trailing, 14)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                 .opacity(chromeOpacity)
                 .onTapGesture {

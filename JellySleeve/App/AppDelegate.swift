@@ -415,6 +415,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let theme = themes.current
         let targetAmbient = isInAmbientMode && theme.artworkFrame != nil
 
+        // The window's own drop-shadow looks like a frame around the cover
+        // when the theme has no glass background (Aero). Suppress it there
+        // and let the artwork's own shadow do the work.
+        window.hasShadow = theme.behavior.hasGlassBackground
+
         // Decide next size.
         let nextSize: CGSize
         if targetAmbient, let art = theme.artworkFrame {

@@ -84,10 +84,13 @@ extension OverlayTheme {
 nonisolated struct BehaviorSpec: Equatable, Sendable {
     let controlsAlwaysVisible: Bool
     /// Whether to wrap the transport controls in a translucent capsule.
-    /// Useful when the controls float over artwork (Elegant, Aero) and need a
-    /// visual container; out of place when they're part of the layout
-    /// (Stack, Classic, Minim).
+    /// Useful when the controls float over artwork and need a visual
+    /// container; out of place when they're part of the layout.
     let controlsHasBackground: Bool
     let glassMaterial: NSVisualEffectView.Material
+    /// Whether to render the translucent glass behind the whole overlay.
+    /// Standard / Classic / Minim use it. Aero turns it off so only the
+    /// artwork and its controls float over the desktop.
+    let hasGlassBackground: Bool
     let shadowOpacity: Double
 }

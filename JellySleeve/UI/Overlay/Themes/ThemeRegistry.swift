@@ -3,11 +3,11 @@ import Observation
 import SwiftUI
 
 /// Holds the list of built-in themes and which one is active. Persists
-/// `selectedId` to UserDefaults under `selectedThemeId` per plan §3bis.5.
+/// `selectedId` to UserDefaults under `selectedThemeId`.
 ///
 /// `OverlayView` observes `current` and re-renders when the user picks
-/// another theme from the Appearance tab (Fase 6). The `AppDelegate` watches
-/// the same value to resize the borderless window to the new
+/// another theme from the Appearance tab. The `AppDelegate` watches the
+/// same value to resize the borderless window to the new
 /// `layout.windowSize`.
 @MainActor
 @Observable
@@ -27,16 +27,24 @@ final class ThemeRegistry {
     }
 
     init() {
-        // Display order per plan §6 Fase 6: Elegant, Stack, Classic, Minim, Aero.
+        // Display order. "Stack" was retired; the default theme used to be
+        // called "Elegant" and is now "Standard". We migrate any persisted
+        // id below.
         self.builtIn = [
-            ElegantTheme(),
-            StackTheme(),
+            StandardTheme(),
             ClassicTheme(),
             MinimTheme(),
             AeroTheme(),
         ]
-        let stored = UserDefaults.standard.string(forKey: Self.storageKey) ?? "elegant"
-        self.selectedId = stored
+        let stored = UserDefaults.standard.string(forKey: Self.storageKey)
+        switch stored {
+        case nil, "elegant", "stack":
+            // Map the renamed / retired ids to the new default.
+            self.selectedId = "standard"
+            UserDefaults.standard.set("standard", forKey: Self.storageKey)
+        case let id?:
+            self.selectedId = id
+        }
     }
 
     func select(_ id: String) {

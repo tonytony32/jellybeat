@@ -22,4 +22,10 @@ nonisolated enum Endpoints {
     static func sessionPrevious(sessionId: String) -> String {
         "/Sessions/\(sessionId)/Playing/PreviousTrack"
     }
+
+    /// Seek inside the currently playing item. The target position is sent
+    /// as a `seekPositionTicks` query parameter (Jellyfin ticks are 100 ns).
+    static func sessionSeek(sessionId: String) -> String {
+        "/Sessions/\(sessionId)/Playing/Seek"
+    }
 }

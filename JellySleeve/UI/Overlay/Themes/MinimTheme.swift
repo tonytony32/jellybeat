@@ -28,6 +28,7 @@ struct MinimTheme: OverlayTheme {
         controlsAlwaysVisible: true,
         controlsHasBackground: false,
         glassMaterial: .toolTip,
+        hasGlassBackground: true,
         shadowOpacity: 0.25
     )
 
@@ -43,25 +44,20 @@ private struct MinimBody: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 6) {
-                    Text(track.title)
-                        .font(theme.typography.title.font)
-                        .fontWeight(theme.typography.title.weight)
-                        .opacity(theme.typography.title.opacity)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(track.title)
+                    .font(theme.typography.title.font)
+                    .fontWeight(theme.typography.title.weight)
+                    .opacity(theme.typography.title.opacity)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
 
-                    Text("•")
-                        .foregroundStyle(.secondary)
-
-                    Text(track.artist)
-                        .font(theme.typography.artist.font)
-                        .fontWeight(theme.typography.artist.weight)
-                        .opacity(theme.typography.artist.opacity)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
+                Text(track.artist)
+                    .font(theme.typography.artist.font)
+                    .fontWeight(theme.typography.artist.weight)
+                    .opacity(theme.typography.artist.opacity)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 

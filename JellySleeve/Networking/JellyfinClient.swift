@@ -131,6 +131,26 @@ nonisolated struct JellyfinClient: Sendable {
         try await postNoContent(Endpoints.sessionPrevious(sessionId: sessionId))
     }
 
+    /// Tell the active client to seek to `positionTicks` (Jellyfin's
+    /// 100 ns units). Used by the progress-bar tap-to-seek interaction.
+    func seek(sessionId: String, positionTicks: Int64) async throws {
+        var components = URLComponents()
+        components.path = Endpoints.sessionSeek(sessionId: sessionId)
+        components.queryItems = [
+            URLQueryItem(name: "seekPositionTicks", value: "\(positionTicks)")
+        ]
+        guard let relative = components.url,
+              let absolute = URL(string: relative.relativeString, relativeTo: configuration.baseURL)?.absoluteURL
+        else {
+            throw NetworkError.invalidURL
+        }
+        var request = URLRequest(url: absolute)
+        request.httpMethod = "POST"
+        request.setValue(configuration.apiKey, forHTTPHeaderField: "X-Emby-Token")
+        let (_, response) = try await send(request, on: controlSession)
+        try validate(response)
+    }
+
     // MARK: - Internals
 
     private func get<T: Decodable & Sendable>(

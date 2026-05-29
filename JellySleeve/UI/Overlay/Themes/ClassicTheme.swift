@@ -29,6 +29,10 @@ struct ClassicTheme: OverlayTheme {
         controlsAlwaysVisible: true,
         controlsHasBackground: false,
         glassMaterial: .hudWindow,
+        // Classic now floats over the desktop like Aero: no glass frame,
+        // text rendered with the dark-mode `.primary` so it stays white
+        // over arbitrary backgrounds.
+        hasGlassBackground: false,
         shadowOpacity: 0.35
     )
 
@@ -53,16 +57,20 @@ private struct ClassicBody: View {
             )
 
             VStack(alignment: .leading, spacing: 4) {
+                Spacer(minLength: 0)
+
                 TrackInfoView(track: track, typography: theme.typography)
 
                 ProgressBarView(
+                    trackKey: track.itemId,
                     position: track.position,
                     runtime: track.runtime,
-                    isPaused: store.isPaused
+                    isPaused: store.isPaused,
+                    onSeek: { seconds in
+                        Task { @MainActor in await store.seek(toSeconds: seconds) }
+                    }
                 )
                 .padding(.top, 2)
-
-                Spacer(minLength: 0)
 
                 ControlsView(
                     isPaused: store.isPaused,
@@ -84,5 +92,6 @@ private struct ClassicBody: View {
             }
         }
         .padding(theme.layout.padding)
+        .colorScheme(.dark)
     }
 }

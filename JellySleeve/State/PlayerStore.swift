@@ -270,6 +270,41 @@ final class PlayerStore {
         }
     }
 
+    /// Seek the currently playing track to an absolute `seconds` value.
+    /// Updates the local snapshot optimistically so the progress bar moves
+    /// before the WebSocket pushes the new state back from the server.
+    func seek(toSeconds seconds: Double) async {
+        guard let client else { return }
+        guard let current = currentTrack else { return }
+        let target = max(0, seconds)
+        let ticks = Int64(target * 10_000_000)
+
+        // Optimistic update.
+        currentTrack = TrackSnapshot(
+            itemId: current.itemId,
+            imageTag: current.imageTag,
+            title: current.title,
+            artist: current.artist,
+            album: current.album,
+            runtime: current.runtime,
+            position: .seconds(target),
+            sessionId: current.sessionId
+        )
+        lastCommandAt = Date()
+
+        do {
+            try await client.seek(sessionId: current.sessionId, positionTicks: ticks)
+            await poller?.forceRefresh()
+            Self.logger.notice("Seek to \(target, privacy: .public)s OK")
+        } catch let error as NetworkError {
+            Self.logger.error("Seek failed: \(String(describing: error), privacy: .public)")
+            showTransient(error.errorDescription ?? "Seek failed.")
+        } catch {
+            Self.logger.error("Seek failed: \(String(describing: error), privacy: .public)")
+            showTransient(error.localizedDescription)
+        }
+    }
+
     private func flashFeedback(_ action: ControlsView.Action) {
         commandFeedback = action
         commandFeedbackTask?.cancel()
