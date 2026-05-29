@@ -59,8 +59,15 @@ struct ServerTab: View {
                 Toggle("Allow self-signed certificates", isOn: $store.allowSelfSigned)
                     .help("Enable for servers behind Tailscale, Caddy, or an internal CA.")
 
-                Toggle("Store API key in Keychain", isOn: $store.useKeychain)
-                    .help("Off (default): API key kept in the app's preferences plist in cleartext. On: stored encrypted in the macOS Keychain.")
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle(
+                        "Store API key in UserDefaults (less secure, portable across reinstalls)",
+                        isOn: $store.storeApiKeyInUserDefaults
+                    )
+                    Text("Keychain is recommended. Only enable this if you have a specific reason.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section("Polling") {

@@ -33,8 +33,8 @@ push — no AppleScript, no Apple Music dependency, no Mac-as-the-source.
   falls back to the default browser otherwise.
 - Self-signed certificate trust is opt-in per server (useful for
   Tailscale or Caddy setups behind an internal CA).
-- API key stored either in the Keychain (encrypted, opt-in) or in the
-  app's preferences plist (cleartext, default — the user picks).
+- API key stored in the macOS Keychain by default (encrypted at rest).
+  Can be switched to the preferences plist via Settings if needed.
 
 ## Requirements
 
@@ -76,9 +76,11 @@ Open Settings (`⌘,`) and fill in the Server tab:
   edit page in the dashboard.
 - **Allow self-signed certificates** — only enable when you know what
   this means.
-- **Store API key in Keychain** — off by default. When on, the key is
-  written to the macOS Keychain instead of the cleartext preferences
-  plist.
+- **Store API key in UserDefaults** — off by default. The API key is
+  stored encrypted in the macOS Keychain by default. Enable only if
+  you need the key to survive a Keychain reset or for a specific
+  migration reason (less secure: the key will be readable in the
+  preferences plist).
 
 Hit **Test connection** to verify. A green check with the server name and
 version means you're good.
@@ -107,9 +109,11 @@ xcodebuild -project JellySleeve.xcodeproj -scheme JellySleeve \
            -destination 'platform=macOS' test
 ```
 
-11 unit tests cover the REST client: fixture decoding, HTTP error
-mapping, and the `X-Emby-Token` auth header. The WebSocket client and
-the SwiftUI layer aren't currently under test.
+16 unit tests cover the REST client and API-key storage: fixture
+decoding, HTTP error mapping, `X-Emby-Token` auth header, migration
+from UserDefaults to Keychain, and read/write behaviour for each
+toggle state. The WebSocket client and the SwiftUI layer aren't
+currently under test.
 
 ## Support and maintenance
 
