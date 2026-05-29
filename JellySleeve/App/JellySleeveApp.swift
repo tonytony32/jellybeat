@@ -10,6 +10,7 @@ struct JellySleeveApp: App {
             SettingsView()
                 .environment(appDelegate.settings)
                 .environment(appDelegate.themes)
+                .environment(appDelegate.player)
         }
 
         MenuBarExtra("JellySleeve", systemImage: "music.note") {

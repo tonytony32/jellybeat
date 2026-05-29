@@ -17,7 +17,14 @@ final class PlayerStore {
         category: "state"
     )
 
+    enum ConnectionMode: Equatable, Sendable {
+        case unknown
+        case webSocket
+        case polling
+    }
+
     var connectionState: ConnectionState = .idle
+    var connectionMode: ConnectionMode = .unknown
     var currentTrack: TrackSnapshot? = nil
     var isPaused: Bool = false
 
@@ -107,17 +114,17 @@ final class PlayerStore {
         isPaused: Bool,
         sessions: [SessionSummary]
     ) {
-        self.connectionState = connectionState
+        if self.connectionState != connectionState { self.connectionState = connectionState }
         // Optimistic-update protection: if a command was issued in the last
         // 1.5 s, ignore the poll's `isPaused` so the local optimistic toggle
         // stays put until the server has confirmed.
         if let lastCommandAt,
            Date().timeIntervalSince(lastCommandAt) < Self.optimisticPlayPauseWindow {
             // skip
-        } else {
+        } else if self.isPaused != isPaused {
             self.isPaused = isPaused
         }
-        self.availableSessions = sessions
+        if self.availableSessions != sessions { self.availableSessions = sessions }
 
         // Track transition smoothing: a new track cancels any pending clear
         // so we go straight from A to B (fade through ArtworkView). A nil
@@ -171,7 +178,12 @@ final class PlayerStore {
         // `LastActivityDate`: an active web player checks in regularly, so
         // anything older than ~10 s belongs to a disconnected client.
         let now = Date()
-        let recencyThreshold: TimeInterval = 10
+        // Jellyfin's web player sends activity updates every ~10 s during
+        // playback but stops when paused. 60 s gives 6 missed heartbeats of
+        // buffer so paused sessions stay tracked long enough for the user to
+        // click play; a disconnected browser's stale session only lingers
+        // for ~60 s before the overlay clears on its own.
+        let recencyThreshold: TimeInterval = 60
         let mine = sessions.filter { session in
             guard session.userId == userId, session.nowPlayingItem != nil else {
                 return false
@@ -249,10 +261,29 @@ final class PlayerStore {
         // The server's eventual confirmation through the poll either ratifies
         // (no visible change) or, if the command failed silently somewhere,
         // the apply() guard expires after 1.5 s and the poll's value wins.
+        let expectedPaused = !isPaused
         isPaused.toggle()
         flashFeedback(.playPause)
         await sendCommand(name: "play/pause") { client, sessionId in
             try await client.playPause(sessionId: sessionId)
+        }
+        // Capture the timestamp set by sendCommand so we can detect whether a
+        // newer command has been issued by the time the deferred check runs.
+        let thisCommandAt = lastCommandAt
+        // Deferred check: after the optimistic window expires, verify the web
+        // player actually honoured the command. If isPaused snapped back, the
+        // Jellyfin web client likely didn't receive the WebSocket push (e.g.
+        // the browser tab was throttled in the background by Safari).
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let elapsed = Date().timeIntervalSince(thisCommandAt ?? .distantPast)
+            let remaining = max(0, Self.optimisticPlayPauseWindow - elapsed)
+            try? await Task.sleep(for: .seconds(remaining + 1.0))
+            guard self.currentTrack != nil,
+                  self.lastCommandAt == thisCommandAt else { return }
+            if self.isPaused != expectedPaused {
+                self.showTransient("Player didn't respond — bring Jellyfin to the foreground.")
+            }
         }
     }
 
