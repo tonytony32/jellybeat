@@ -5,6 +5,7 @@ import SwiftUI
 /// Reads the last ~100 `os_log` entries written under JellySleeve's subsystem
 /// and renders them with a copy-to-clipboard helper (plan §6 Fase 6).
 struct DiagnosticsTab: View {
+    @Environment(PlayerStore.self) private var player
     @State private var entries: [LogEntry] = []
     @State private var isLoading = false
     @State private var loadError: String?
@@ -19,11 +20,46 @@ struct DiagnosticsTab: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            statusBanner
+            Divider()
             toolbar
             Divider()
             list
         }
         .task { await reload() }
+    }
+
+    private var statusBanner: some View {
+        HStack(spacing: 24) {
+            StatusPill(
+                label: "Transport",
+                value: player.connectionMode.label,
+                color: player.connectionMode.color
+            )
+            StatusPill(
+                label: "Connection",
+                value: player.connectionState.label,
+                color: player.connectionState.statusColor
+            )
+            StatusPill(
+                label: "Sessions",
+                value: "\(player.availableSessions.count)",
+                color: player.availableSessions.isEmpty ? .secondary : .primary
+            )
+            if player.currentTrack != nil {
+                StatusPill(
+                    label: "Now playing",
+                    value: player.isPaused ? "Paused" : "Playing",
+                    color: player.isPaused ? .orange : .green
+                )
+            } else {
+                StatusPill(label: "Now playing", value: "—", color: .secondary)
+            }
+            Spacer()
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 10)
+        .background(.quaternary.opacity(0.5))
     }
 
     private var toolbar: some View {
@@ -191,7 +227,68 @@ private struct LogEntryRow: View {
     }
 }
 
+private struct StatusPill: View {
+    let label: String
+    let value: String
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.system(.caption2, design: .default))
+                .foregroundStyle(.tertiary)
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(color)
+                    .frame(width: 6, height: 6)
+                Text(value)
+                    .font(.system(.caption, design: .default).weight(.medium))
+                    .foregroundStyle(.primary)
+            }
+        }
+    }
+}
+
+extension PlayerStore.ConnectionMode {
+    var label: String {
+        switch self {
+        case .unknown:   return "Connecting…"
+        case .webSocket: return "WebSocket"
+        case .polling:   return "Polling"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .unknown:   return .secondary
+        case .webSocket: return .green
+        case .polling:   return .orange
+        }
+    }
+}
+
+extension ConnectionState {
+    var label: String {
+        switch self {
+        case .idle:             return "Idle"
+        case .connecting:       return "Connecting"
+        case .connected:        return "Connected"
+        case .error:            return "Error"
+        }
+    }
+
+    var statusColor: Color {
+        switch self {
+        case .idle:       return .secondary
+        case .connecting: return .yellow
+        case .connected:  return .green
+        case .error:      return .red
+        }
+    }
+}
+
 #Preview {
     DiagnosticsTab()
+        .environment(PlayerStore())
         .frame(width: 520, height: 420)
 }

@@ -53,12 +53,22 @@ final class MediaCenterController {
             self?.dispatch { await self?.player.playPause() }
             return .success
         }
+        // play/pause are directional: only act if the state actually needs
+        // to change. macOS sends pauseCommand on incoming calls or audio
+        // interrupts — if music is already paused, a toggle would wrongly
+        // start playback instead of doing nothing.
         center.playCommand.addTarget { [weak self] _ in
-            self?.dispatch { await self?.player.playPause() }
+            self?.dispatch {
+                guard let self, self.player.isPaused else { return }
+                await self.player.playPause()
+            }
             return .success
         }
         center.pauseCommand.addTarget { [weak self] _ in
-            self?.dispatch { await self?.player.playPause() }
+            self?.dispatch {
+                guard let self, !self.player.isPaused else { return }
+                await self.player.playPause()
+            }
             return .success
         }
         center.nextTrackCommand.addTarget { [weak self] _ in

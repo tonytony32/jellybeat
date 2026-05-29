@@ -147,6 +147,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.socketClient = socket
         self.socketFailureStreak = 0
         player.configure(client: client, poller: poller)
+        player.connectionMode = .unknown
         player.updateConnection(.connecting)
 
         // Drive the swap-to-polling decision off the socket's state stream.
@@ -170,6 +171,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         socketStateTask?.cancel()
         socketStateTask = nil
         player.configure(client: nil, poller: nil)
+        player.connectionMode = .unknown
         if let oldPoller {
             Task { await oldPoller.stop() }
         }
@@ -190,6 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 continue
             case .connected:
                 socketFailureStreak = 0
+                player.connectionMode = .webSocket
                 if let poller {
                     Self.logger.notice("WebSocket up; pausing polling fallback.")
                     Task { await poller.stop() }
@@ -199,9 +202,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Self.logger.error("WebSocket failed (\(self.socketFailureStreak, privacy: .public)/\(Self.socketMaxConsecutiveFailures, privacy: .public)): \(message, privacy: .public)")
                 if socketFailureStreak >= Self.socketMaxConsecutiveFailures {
                     Self.logger.notice("WebSocket gave up after \(self.socketFailureStreak, privacy: .public) failures; switching to polling.")
-                    Task { [socket] in await socket.stop() }
                     startPollerFallback()
-                    return
+                    // Don't return — keep the loop alive so a successful
+                    // reconnect can flip us back to WebSocket mode. Schedule
+                    // a reconnect attempt after a 60 s backoff.
+                    scheduleWebSocketReconnect(socket: socket)
                 } else {
                     // Retry the socket with a short backoff before giving up.
                     Task { [weak self, socket] in
@@ -220,12 +225,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let client = currentClient,
               let config = settings.jellyfinConfiguration,
               let poller else { return }
+        // Idempotent: skip if the poller is already the active transport.
+        // Called repeatedly during WebSocket reconnect cycles — only the
+        // first call (or a call after a brief WebSocket reconnect) needs
+        // to actually start the poller.
+        guard player.connectionMode != .polling else { return }
+        player.connectionMode = .polling
         Task { [poller, settings] in
             await poller.start(
                 client: client,
                 userId: config.userId,
                 baseDelay: settings.refreshRate
             )
+        }
+    }
+
+    /// Schedule a WebSocket reconnect attempt after a 60 s backoff. Called
+    /// after the socket has permanently failed and the poller has taken over.
+    /// If the reconnect succeeds, `observeSocketStates` receives `.connected`
+    /// and stops the poller; if it fails again, the cycle repeats.
+    private func scheduleWebSocketReconnect(socket: JellyfinSocketClient) {
+        Task { [weak self, socket] in
+            try? await Task.sleep(for: .seconds(60))
+            guard let self, self.socketClient === socket else { return }
+            Self.logger.notice("Retrying WebSocket after polling fallback.")
+            // Reset streak so the socket gets a fresh set of attempts.
+            self.socketFailureStreak = 0
+            await socket.start()
         }
     }
 
@@ -567,7 +593,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.isReleasedWhenClosed = false
 
-        let hosting = NSHostingView(
+        let hosting = ClickableHostingView(
             rootView: OverlayView()
                 .environment(settings)
                 .environment(player)
@@ -706,6 +732,24 @@ final class ClickableBorderlessWindow: NSWindow {
             makeKey()
         }
         super.sendEvent(event)
+    }
+}
+
+/// NSHostingView subclass that prevents click-through in the transparent
+/// gaps between overlay UI elements (track info, progress bar, controls).
+///
+/// For an NSWindow with `isOpaque = false`, AppKit passes mouse events to
+/// the window below whenever the content view's `hitTest` returns nil —
+/// which NSHostingView does for any SwiftUI area that has no interactive
+/// content. This subclass intercepts that nil return and falls back to
+/// `self`, so the overlay catches every click within its bounds. Interactive
+/// SwiftUI content (buttons, gestures) is unaffected because NSHostingView's
+/// own hit-test path returns a non-nil view for those areas and our fallback
+/// is never reached. `mouseDownCanMoveWindow` stays true (NSView default),
+/// so dragging the overlay by its gaps still repositions the window.
+final class ClickableHostingView<Content: View>: NSHostingView<Content> {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        super.hitTest(point) ?? (bounds.contains(point) ? self : nil)
     }
 }
 

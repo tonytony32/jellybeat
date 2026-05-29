@@ -39,6 +39,9 @@ actor JellyfinSocketClient {
     private var heartbeatTask: Task<Void, Never>?
     private(set) var state: State = .idle
     private var heartbeatIntervalNanos: UInt64 = 30_000_000_000
+    /// Set to true before any intentional close so the receiveLoop's catch
+    /// block doesn't misread the resulting URLError as a real failure.
+    private var stoppedIntentionally = false
 
     /// Stream of state transitions. AppDelegate observes this to drive its
     /// "WebSocket connected → polling stopped" / "WebSocket failed → polling
@@ -70,6 +73,23 @@ actor JellyfinSocketClient {
     }
 
     func start() async {
+        // Cancel any in-flight task before opening a new one so we never have
+        // two concurrent WebSocket connections to the same server. Set the
+        // intentional-stop flag first so the old receiveLoop's catch block
+        // doesn't emit a spurious .failed transition.
+        // Flag must stay true until the very last moment before the new loops
+        // start. The old receiveLoop/heartbeatLoop catch blocks run on the
+        // actor, but they can't acquire it until the first await below. By
+        // keeping the flag true throughout, any catch block that wakes up and
+        // finds stoppedIntentionally=true exits silently instead of emitting a
+        // spurious .failed that AppDelegate would interpret as a real failure
+        // and schedule an unwanted retry.
+        stoppedIntentionally = true
+        task?.cancel(with: .normalClosure, reason: nil)
+        task = nil
+        receiveTask?.cancel()
+        heartbeatTask?.cancel()
+
         await transition(to: .connecting)
 
         guard let url = Self.buildSocketURL(configuration: configuration, deviceId: deviceId) else {
@@ -96,11 +116,16 @@ actor JellyfinSocketClient {
         let safeHost = "\(url.host ?? "?"):\(url.port.map { String($0) } ?? "?")"
         Self.logger.notice("WebSocket connected to \(safeHost, privacy: .public)")
 
+        // Old loops had at least two actor-suspension points (the transitions
+        // above) to observe stoppedIntentionally=true and exit. Reset now so
+        // the new loops treat genuine failures as failures.
+        stoppedIntentionally = false
         startLoops()
     }
 
     func stop() {
         Self.logger.notice("Stopping WebSocket")
+        stoppedIntentionally = true
         task?.cancel(with: .normalClosure, reason: nil)
         task = nil
         receiveTask?.cancel()
@@ -139,6 +164,7 @@ actor JellyfinSocketClient {
                 let decoded = try IncomingSocketMessage.decode(payload)
                 await handle(decoded)
             } catch {
+                if stoppedIntentionally { return }
                 Self.logger.error("Socket receive failed: \(String(describing: error), privacy: .public)")
                 await transition(to: .failed(error.localizedDescription))
                 return
@@ -153,6 +179,7 @@ actor JellyfinSocketClient {
             do {
                 try await send(.keepAlive())
             } catch {
+                if stoppedIntentionally { return }
                 Self.logger.error("Socket heartbeat failed: \(String(describing: error), privacy: .public)")
                 await transition(to: .failed("Heartbeat failed."))
                 return
