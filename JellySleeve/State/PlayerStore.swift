@@ -178,19 +178,34 @@ final class PlayerStore {
         // `LastActivityDate`: an active web player checks in regularly, so
         // anything older than ~10 s belongs to a disconnected client.
         let now = Date()
-        // Jellyfin's web player sends activity updates every ~10 s during
-        // playback but stops when paused. 60 s gives 6 missed heartbeats of
-        // buffer so paused sessions stay tracked long enough for the user to
-        // click play; a disconnected browser's stale session only lingers
-        // for ~60 s before the overlay clears on its own.
-        let recencyThreshold: TimeInterval = 60
+        // Jellyfin's web player sends `LastActivityDate` heartbeats every
+        // ~10 s while *playing* but stops the moment it's paused — and a
+        // minimized/background browser tab is throttled harder still. So a
+        // stale heartbeat means two very different things depending on the
+        // play state, and we can't use one threshold for both:
+        //
+        //  - Playing but silent > 60 s: the client genuinely vanished
+        //    (tab closed mid-track). Drop it so the overlay clears.
+        //  - Paused and silent: this is *expected* — a paused web player
+        //    legitimately stops heartbeating, and minimizing it stops it
+        //    sooner. Dropping it after 60 s is the bug that flips the
+        //    overlay to ambient mode while the user's track is merely
+        //    paused. Give paused sessions a generous window so they survive
+        //    being parked & minimized, while still self-healing eventually
+        //    if the tab was actually closed while paused.
+        let playingRecency: TimeInterval = 60
+        let pausedRecency: TimeInterval = 15 * 60
         let mine = sessions.filter { session in
             guard session.userId == userId, session.nowPlayingItem != nil else {
                 return false
             }
-            if let last = session.lastActivityDate,
-               now.timeIntervalSince(last) > recencyThreshold {
-                return false
+            if let last = session.lastActivityDate {
+                let threshold = (session.playState?.isPaused ?? false)
+                    ? pausedRecency
+                    : playingRecency
+                if now.timeIntervalSince(last) > threshold {
+                    return false
+                }
             }
             return true
         }
