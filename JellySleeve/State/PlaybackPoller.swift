@@ -102,10 +102,19 @@ actor PlaybackPoller {
             case .ok:
                 consecutiveFailures = 0
                 await sleepBeforeNextTick(baseDelay: baseDelay)
-            case .transient:
+            case .transient(let offline):
                 consecutiveFailures += 1
+                // Surface the dropped link immediately rather than leaving the
+                // overlay showing a stale `.connected` track the user can't
+                // actually control. The state preserves `currentTrack`, so the
+                // overlay dims it and shows a "reconnecting" badge while we keep
+                // retrying. A successful tick flips it straight back to
+                // `.connected` via `ingest`.
+                await MainActor.run {
+                    store.updateConnection(.reconnecting(isOffline: offline))
+                }
                 let delay = nextBackoff(baseDelay: baseDelay)
-                Self.logger.notice("Transient failure #\(self.consecutiveFailures, privacy: .public), backing off \(delay, privacy: .public)s")
+                Self.logger.notice("Transient failure #\(self.consecutiveFailures, privacy: .public) (offline=\(offline, privacy: .public)), backing off \(delay, privacy: .public)s")
                 await sleepBeforeNextTick(baseDelay: delay)
             case .fatal(let message):
                 Self.logger.error("Fatal poll error: \(message, privacy: .public). Stopping loop.")
@@ -117,7 +126,9 @@ actor PlaybackPoller {
 
     private enum TickOutcome {
         case ok
-        case transient
+        /// Retryable failure. `offline` is true when the device has no network
+        /// path at all (vs the server merely being unreachable).
+        case transient(offline: Bool)
         case fatal(String)
     }
 
@@ -132,13 +143,15 @@ actor PlaybackPoller {
             return .fatal("Unauthorized — check your API key.")
         } catch NetworkError.selfSignedCert {
             return .fatal("TLS rejected — enable 'Allow self-signed certificates' in Settings if your server uses one.")
+        } catch NetworkError.offline {
+            return .transient(offline: true)
         } catch let NetworkError.serverError(code) where (500...599).contains(code) {
-            return .transient
+            return .transient(offline: false)
         } catch NetworkError.transport, NetworkError.serverError {
-            return .transient
+            return .transient(offline: false)
         } catch {
             Self.logger.error("Unexpected poll error: \(String(describing: error), privacy: .public)")
-            return .transient
+            return .transient(offline: false)
         }
     }
 

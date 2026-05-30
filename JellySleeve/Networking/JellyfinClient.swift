@@ -262,13 +262,11 @@ nonisolated struct JellyfinClient: Sendable {
     ) async throws -> (Data, URLResponse) {
         do {
             return try await session.data(for: request)
-        } catch let urlError as URLError where urlError.code == .serverCertificateUntrusted
-                                            || urlError.code == .serverCertificateHasUnknownRoot
-                                            || urlError.code == .serverCertificateNotYetValid
-                                            || urlError.code == .serverCertificateHasBadDate {
-            throw NetworkError.selfSignedCert
         } catch {
-            throw NetworkError.transport(String(describing: error))
+            // Funnel every URLSession failure through one mapper so raw
+            // NSURLError dumps never reach the UI. Self-signed/TLS, offline,
+            // and generic transport errors are classified there.
+            throw NetworkError.from(error)
         }
     }
 

@@ -270,19 +270,21 @@ extension PlayerStore.ConnectionMode {
 extension ConnectionState {
     var label: String {
         switch self {
-        case .idle:             return "Idle"
-        case .connecting:       return "Connecting"
-        case .connected:        return "Connected"
-        case .error:            return "Error"
+        case .idle:                          return "Idle"
+        case .connecting:                    return "Connecting"
+        case .connected:                     return "Connected"
+        case .reconnecting(let isOffline):   return isOffline ? "Offline" : "Reconnecting"
+        case .error:                         return "Error"
         }
     }
 
     var statusColor: Color {
         switch self {
-        case .idle:       return .secondary
-        case .connecting: return .yellow
-        case .connected:  return .green
-        case .error:      return .red
+        case .idle:         return .secondary
+        case .connecting:   return .yellow
+        case .connected:    return .green
+        case .reconnecting: return .orange
+        case .error:        return .red
         }
     }
 }
