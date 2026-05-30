@@ -79,7 +79,8 @@ private struct MinimBody: View {
                 isFavorite: track.isFavorite,
                 onToggleFavorite: {
                     Task { @MainActor in await store.toggleFavorite() }
-                }
+                },
+                queue: store.queue
             )
         }
         .padding(theme.layout.padding)

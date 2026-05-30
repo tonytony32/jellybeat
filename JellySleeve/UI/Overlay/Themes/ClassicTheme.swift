@@ -97,7 +97,8 @@ private struct ClassicBody: View {
                     isFavorite: track.isFavorite,
                     onToggleFavorite: {
                         Task { @MainActor in await store.toggleFavorite() }
-                    }
+                    },
+                    queue: store.queue
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
             }

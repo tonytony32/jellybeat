@@ -22,9 +22,13 @@ struct ControlsView: View {
     let isFavorite: Bool
     /// Toggles the favorite flag on the current track.
     let onToggleFavorite: @MainActor () -> Void
+    /// The active client's play queue, shown in the queue popover.
+    let queue: [QueueItem]
 
     @State private var hoveredAction: Action?
     @State private var favoriteHovered = false
+    @State private var queueHovered = false
+    @State private var showQueue = false
 
     var body: some View {
         // Tight spacing because each button now claims a 44 pt hit target
@@ -39,6 +43,7 @@ struct ControlsView: View {
             )
             controlButton(systemName: "forward.fill", action: .next)
             favoriteButton
+            queueButton
         }
         .padding(.horizontal, behavior.controlsHasBackground ? 12 : 0)
         .padding(.vertical, behavior.controlsHasBackground ? 6 : 0)
@@ -115,6 +120,33 @@ struct ControlsView: View {
         .animation(.spring(response: 0.22, dampingFraction: 0.65), value: favoriteHovered)
         .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isFavorite)
         .focusEffectDisabled()
+    }
+
+    /// Opens the queue popover ("up next"). Sits at the trailing edge after the
+    /// heart and rides the same hover/capsule treatment as the rest of the row.
+    @ViewBuilder
+    private var queueButton: some View {
+        Button {
+            showQueue.toggle()
+        } label: {
+            Image(systemName: "list.bullet")
+                .font(.system(size: 14, weight: .semibold))
+                .frame(width: 24, height: 24)
+                .overlayHitTarget()
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(String(localized: "Show queue"))
+        .scaleEffect(queueHovered ? 1.12 : 1.0)
+        .onHover { queueHovered = $0 }
+        .animation(.spring(response: 0.22, dampingFraction: 0.65), value: queueHovered)
+        .focusEffectDisabled()
+        // Emanate from the trailing edge so the list opens to the right, into
+        // empty screen space, instead of upward over the artwork/track frame.
+        // SwiftUI auto-flips to the leading side if the overlay is snapped
+        // against the screen's right edge and there's no room.
+        .popover(isPresented: $showQueue, arrowEdge: .trailing) {
+            QueuePopover(queue: queue)
+        }
     }
 
     private func scale(for action: Action) -> CGFloat {

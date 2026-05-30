@@ -50,6 +50,21 @@ nonisolated struct TrackSnapshot: Equatable, Sendable {
     }
 }
 
+/// One row of the active client's play queue, materialised from a session's
+/// `NowPlayingQueueFullItems`. Read-only: Jellyfin exposes the queue but no
+/// "jump to this entry" session command, so the popover is a preview of what's
+/// playing and what's up next, with `isCurrent` marking the now-playing row.
+nonisolated struct QueueItem: Equatable, Sendable, Identifiable {
+    /// Stable within one queue snapshot. Composed from the position + item id
+    /// because the same track can legitimately appear twice in a queue.
+    let id: String
+    let itemId: String
+    let imageTag: String?
+    let title: String
+    let artist: String
+    let isCurrent: Bool
+}
+
 /// Lightweight description of one session shown in the manual selector
 /// (plan §4 point 2). Stored in `PlayerStore.availableSessions` so the UI can
 /// offer a picker when more than one device is playing for the same user.

@@ -76,7 +76,8 @@ private struct AeroBody: View {
                     isFavorite: track.isFavorite,
                     onToggleFavorite: {
                         Task { @MainActor in await store.toggleFavorite() }
-                    }
+                    },
+                    queue: store.queue
                 )
                 .padding(.bottom, 10)
             }
