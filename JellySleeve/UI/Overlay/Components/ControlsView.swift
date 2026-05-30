@@ -22,7 +22,10 @@ struct ControlsView: View {
     @State private var hoveredAction: Action?
 
     var body: some View {
-        HStack(spacing: 14) {
+        // Tight spacing because each button now claims a 44 pt hit target
+        // (see `overlayHitTarget`); the boxes sit edge-to-edge so the whole
+        // row is contiguously tappable while the glyphs stay where they were.
+        HStack(spacing: 0) {
             controlButton(systemName: "backward.fill", action: .previous)
             controlButton(
                 systemName: isPaused ? "play.fill" : "pause.fill",
@@ -67,6 +70,7 @@ struct ControlsView: View {
             Image(systemName: systemName)
                 .font(.system(size: emphasised ? 18 : 14, weight: .semibold))
                 .frame(width: emphasised ? 28 : 24, height: emphasised ? 28 : 24)
+                .overlayHitTarget()
         }
         .buttonStyle(.plain)
         .accessibilityLabel(action.accessibilityLabel)
@@ -83,6 +87,24 @@ struct ControlsView: View {
         if flashedAction == action { return 1.35 }
         if hoveredAction == action { return 1.12 }
         return 1.0
+    }
+}
+
+// MARK: - Reusable hit target
+
+extension View {
+    /// Guarantees a minimum interactive area (Apple's 44 pt HIG minimum by
+    /// default) and makes the whole rectangle tappable, *without* enlarging
+    /// the drawn content. Apply to every overlay control — current and future.
+    ///
+    /// The borderless overlay window absorbs any click inside its bounds (see
+    /// `ClickableHostingView`), so a generous hit target keeps a near-miss on
+    /// the control instead of letting the click fall through to the desktop —
+    /// which on macOS Sonoma+ triggers "click wallpaper to reveal desktop"
+    /// and shoves every window aside.
+    func overlayHitTarget(_ minSize: CGFloat = 44) -> some View {
+        frame(minWidth: minSize, minHeight: minSize)
+            .contentShape(Rectangle())
     }
 }
 
