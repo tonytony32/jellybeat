@@ -60,7 +60,7 @@ final class PlayerStore {
     /// Set briefly after a control action so the overlay can flash a large
     /// SF Symbol confirming the dispatch — useful when the user pressed a
     /// media key (F7/F8/F9) and the artwork/title hasn't updated yet.
-    var commandFeedback: ControlsView.Action? = nil
+    var commandFeedback: PlaybackAction? = nil
 
     // MARK: - Wired in by AppDelegate
 
@@ -336,7 +336,7 @@ final class PlayerStore {
         }
     }
 
-    private func flashFeedback(_ action: ControlsView.Action) {
+    private func flashFeedback(_ action: PlaybackAction) {
         commandFeedback = action
         commandFeedbackTask?.cancel()
         commandFeedbackTask = Task { @MainActor [weak self] in

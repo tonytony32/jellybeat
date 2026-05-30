@@ -46,6 +46,7 @@ actor ArtworkCache {
         let key = Self.cacheKey(itemId: itemId, tag: tag)
 
         if let cached = memory[key] {
+            touch(key: key)
             return cached
         }
 
@@ -69,12 +70,28 @@ actor ArtworkCache {
     private func store(key: String, data: Data) {
         if memory[key] == nil {
             insertionOrder.append(key)
+        } else {
+            promote(key: key)
         }
         memory[key] = data
         while insertionOrder.count > memoryCap {
             let evicted = insertionOrder.removeFirst()
             memory.removeValue(forKey: evicted)
         }
+    }
+
+    /// Mark an existing entry as most-recently-used so the eviction policy is
+    /// true LRU rather than insertion-order FIFO: a frequently requested cover
+    /// stays resident even when it was one of the first ones cached.
+    private func touch(key: String) {
+        guard memory[key] != nil else { return }
+        promote(key: key)
+    }
+
+    private func promote(key: String) {
+        guard let index = insertionOrder.firstIndex(of: key) else { return }
+        insertionOrder.remove(at: index)
+        insertionOrder.append(key)
     }
 
     private static func cacheKey(itemId: String, tag: String?) -> String {

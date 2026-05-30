@@ -3,17 +3,9 @@ import SwiftUI
 /// Hover-revealed transport controls. The actual command wiring is supplied
 /// by the enclosing theme via the `action` closure.
 struct ControlsView: View {
-    enum Action: Hashable, Sendable {
-        case previous, playPause, next
-
-        var accessibilityLabel: String {
-            switch self {
-            case .previous: return String(localized: "Previous track")
-            case .playPause: return String(localized: "Play or pause")
-            case .next: return String(localized: "Next track")
-            }
-        }
-    }
+    /// Alias kept for call-site readability; the canonical type is the
+    /// domain-level `PlaybackAction`.
+    typealias Action = PlaybackAction
 
     let isPaused: Bool
     let isCommandInFlight: Bool
@@ -91,5 +83,17 @@ struct ControlsView: View {
         if flashedAction == action { return 1.35 }
         if hoveredAction == action { return 1.12 }
         return 1.0
+    }
+}
+
+// MARK: - UI mapping
+
+private extension PlaybackAction {
+    var accessibilityLabel: String {
+        switch self {
+        case .previous: return String(localized: "Previous track")
+        case .playPause: return String(localized: "Play or pause")
+        case .next: return String(localized: "Next track")
+        }
     }
 }

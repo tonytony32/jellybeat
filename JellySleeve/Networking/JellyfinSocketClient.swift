@@ -30,9 +30,12 @@ actor JellyfinSocketClient {
 
     private let configuration: JellyfinConfiguration
     private let deviceId: String
-    private let userId: String
     private let store: PlayerStore
     private let session: URLSession
+
+    /// The configured user whose sessions we subscribe to. Sourced from
+    /// `configuration` so there is a single source of truth.
+    private var userId: String { configuration.userId }
 
     private var task: URLSessionWebSocketTask?
     private var receiveTask: Task<Void, Never>?
@@ -52,12 +55,10 @@ actor JellyfinSocketClient {
     init(
         configuration: JellyfinConfiguration,
         deviceId: String,
-        userId: String,
         store: PlayerStore
     ) {
         self.configuration = configuration
         self.deviceId = deviceId
-        self.userId = userId
         self.store = store
 
         let urlConfig = URLSessionConfiguration.ephemeral
