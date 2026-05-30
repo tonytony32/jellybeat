@@ -124,6 +124,9 @@ final class OverlayWindowController: NSObject {
         )
         hosting.autoresizingMask = [.width, .height]
         hosting.frame = contentRect
+        hosting.onScrollVolume = { [weak player] delta in
+            player?.nudgeVolume(by: delta)
+        }
         window.contentView = hosting
 
         window.center()
@@ -482,7 +485,46 @@ final class ClickableBorderlessWindow: NSWindow {
 /// is never reached. `mouseDownCanMoveWindow` stays true (NSView default),
 /// so dragging the overlay by its gaps still repositions the window.
 final class ClickableHostingView<Content: View>: NSHostingView<Content> {
+    /// Invoked with a signed volume delta (percentage points) when the user
+    /// scrolls over the overlay. Wired up by `OverlayWindowController` to
+    /// `PlayerStore.nudgeVolume`. Scroll-up is positive (louder).
+    var onScrollVolume: (@MainActor (Int) -> Void)?
+
+    /// Leftover precise-scroll distance (trackpad) not yet worth a whole step.
+    private var scrollAccumulator: CGFloat = 0
+
     override func hitTest(_ point: NSPoint) -> NSView? {
         super.hitTest(point) ?? (bounds.contains(point) ? self : nil)
+    }
+
+    /// Map vertical scrolling over the overlay to volume changes. Scroll events
+    /// only reach this view while the cursor is over the window, so this is
+    /// implicitly "scroll while hovering". Mouse-wheel notches move in fixed
+    /// steps; precise (trackpad) deltas accumulate so a longer swipe moves more.
+    /// Direction is inverted: scroll *down* raises the volume, *up* lowers it.
+    override func scrollWheel(with event: NSEvent) {
+        guard let onScrollVolume else {
+            super.scrollWheel(with: event)
+            return
+        }
+        let deltaY = event.scrollingDeltaY
+        guard deltaY != 0 else { return }
+
+        let amount: Int
+        if event.hasPreciseScrollingDeltas {
+            // Reset leftover distance at the start of a fresh gesture so an old
+            // partial step doesn't bleed into the new one.
+            if event.phase.contains(.began) { scrollAccumulator = 0 }
+            scrollAccumulator += deltaY
+            let pointsPerStep: CGFloat = 5
+            let steps = (scrollAccumulator / pointsPerStep).rounded(.towardZero)
+            guard steps != 0 else { return }
+            scrollAccumulator -= steps * pointsPerStep
+            amount = -Int(steps)
+        } else {
+            // Legacy mouse wheel: each event is one discrete notch.
+            amount = deltaY > 0 ? -3 : 3
+        }
+        onScrollVolume(amount)
     }
 }

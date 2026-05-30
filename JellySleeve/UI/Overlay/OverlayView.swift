@@ -69,6 +69,9 @@ struct OverlayView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .padding(.bottom, 8)
                 .allowsHitTesting(false)
+            VolumeFeedbackView(level: player.volumeFeedback)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .allowsHitTesting(false)
         }
         .clipShape(
             RoundedRectangle(
@@ -77,6 +80,7 @@ struct OverlayView: View {
             )
         )
         .animation(.easeInOut(duration: 0.25), value: player.transientMessage)
+        .animation(.easeInOut(duration: 0.15), value: player.volumeFeedback)
         .animation(.easeInOut(duration: 0.25), value: ambientHover)
         .animation(.spring(response: 0.25, dampingFraction: 0.7), value: player.commandFeedback)
     }
@@ -88,6 +92,23 @@ struct OverlayView: View {
             IdleStateView(openSettings: openSettings)
         case .error(let message):
             ErrorStateView(message: message, openSettings: openSettings)
+        case .reconnecting(let isOffline):
+            if let track = player.currentTrack {
+                // Keep the last track on screen for continuity, but dimmed and
+                // topped with a quiet badge so it reads as "paused link, not a
+                // crash". Controls are gated in PlayerStore, so a press here
+                // just surfaces the reconnecting hint.
+                themes.current.body(track: track, store: player)
+                    .id(themes.current.id)
+                    .opacity(0.4)
+                    .overlay(alignment: .top) {
+                        ReconnectingBadge(isOffline: isOffline)
+                            .padding(.top, 8)
+                    }
+                    .transition(.opacity)
+            } else {
+                ReconnectingStateView(isOffline: isOffline)
+            }
         case .connecting, .connected:
             if let track = player.currentTrack {
                 themes.current.body(track: track, store: player)
@@ -152,6 +173,58 @@ private struct ErrorStateView: View {
     }
 }
 
+/// Quiet pill floated over the (dimmed) last track while the link is down and
+/// the poller is retrying. Mirrors the transient toast's capsule treatment so
+/// it reads as part of the overlay chrome, not an alert.
+private struct ReconnectingBadge: View {
+    let isOffline: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ProgressView()
+                .controlSize(.small)
+                .scaleEffect(0.7)
+            Text(isOffline ? "Offline" : "Reconnecting…")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background {
+            Capsule().fill(.ultraThinMaterial)
+                .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 1)
+        }
+    }
+}
+
+/// Shown when the link drops while nothing is playing (no track to dim). Gentle
+/// on purpose: this is a transient, self-healing state, so — unlike
+/// `ErrorStateView` — there's no red triangle and no "Open Settings" (the
+/// config is fine; the server is just temporarily unreachable).
+private struct ReconnectingStateView: View {
+    let isOffline: Bool
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: isOffline ? "wifi.slash" : "antenna.radiowaves.left.and.right.slash")
+                .font(.system(size: 26, weight: .light))
+                .foregroundStyle(.secondary)
+            Text(isOffline ? "You're offline" : "Lost connection to the server")
+                .font(.callout)
+                .multilineTextAlignment(.center)
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.8)
+                Text("Reconnecting…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(20)
+    }
+}
+
 /// 2-second toast surfaced when a playback command fails (plan §6 Fase 5).
 private struct TransientToastView: View {
     let message: String?
@@ -168,6 +241,52 @@ private struct TransientToastView: View {
                         .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 1)
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+}
+
+/// Centered volume readout flashed while the user scrolls over the overlay to
+/// change the volume. Mirrors the system volume HUD in spirit: a speaker glyph
+/// that reflects the level, a thin progress track, and the percentage.
+private struct VolumeFeedbackView: View {
+    let level: Int?
+
+    var body: some View {
+        if let level {
+            VStack(spacing: 8) {
+                Image(systemName: speakerSymbol(for: level))
+                    .font(.system(size: 22, weight: .semibold))
+                    .contentTransition(.symbolEffect(.replace))
+                    .frame(height: 24)
+                Capsule()
+                    .fill(.secondary.opacity(0.3))
+                    .frame(width: 90, height: 5)
+                    .overlay(alignment: .leading) {
+                        Capsule()
+                            .fill(.primary)
+                            .frame(width: 90 * CGFloat(level) / 100, height: 5)
+                    }
+                Text("\(level)%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .shadow(color: .black.opacity(0.25), radius: 6, x: 0, y: 2)
+            }
+            .transition(.opacity.combined(with: .scale(scale: 0.92)))
+        }
+    }
+
+    private func speakerSymbol(for level: Int) -> String {
+        switch level {
+        case ...0: return "speaker.slash.fill"
+        case 1...33: return "speaker.wave.1.fill"
+        case 34...66: return "speaker.wave.2.fill"
+        default: return "speaker.wave.3.fill"
         }
     }
 }

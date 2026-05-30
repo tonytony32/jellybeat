@@ -9,8 +9,15 @@ nonisolated enum ConnectionState: Equatable, Sendable {
     case connecting
     /// Polling loop is up; the server is reachable.
     case connected
-    /// Hard failure. The associated string is shown to the user. Poller is
-    /// stopped (plan §5.2 for 401, §5.1 after the backoff cap is reached).
+    /// The link dropped (server down, network blip, or device offline) but the
+    /// transport is still retrying with backoff. Distinct from `.error`: the
+    /// overlay keeps the last track on screen (dimmed) and recovers on its own
+    /// when the server comes back — no user action, no "Open Settings". When
+    /// `isOffline` is true the device itself has no network path.
+    case reconnecting(isOffline: Bool)
+    /// Hard failure that retrying won't heal (bad API key / untrusted cert).
+    /// The associated string is shown to the user and the poller stops
+    /// (plan §5.2 for 401). This is the only state that routes to Settings.
     case error(String)
 }
 
