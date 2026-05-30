@@ -34,6 +34,18 @@ final class OverlayWindowController: NSObject {
     /// or the full-layout footprint. Lets us compute the correct screen
     /// origin when transitioning between the two modes.
     private var windowIsAmbient: Bool = false
+    /// True between the start of a user drag and ~200 ms after it settles.
+    /// While set, `applyWindowSizeForCurrentState` leaves the window alone so a
+    /// background poll can't reposition (and fight) the window mid-drag.
+    private var isUserDragging: Bool = false
+    /// Fires once window movement stops, to snap + persist. Debounced so we
+    /// never call `setFrameOrigin` mid-drag (which jitters), and so the snap
+    /// runs cleanly on release.
+    private var dragSettleTask: Task<Void, Never>?
+    /// Last ambient state pushed through `applyWindowSizeForCurrentState`, so
+    /// the per-poll `currentTrack` churn doesn't re-run the geometry pass when
+    /// only the playback position changed.
+    private var lastAppliedAmbient: Bool?
 
     init(
         settings: SettingsStore,
@@ -233,14 +245,27 @@ final class OverlayWindowController: NSObject {
     /// Shrink the overlay to artwork-size when the server is reachable but
     /// nothing is playing, so the floating window stays out of the way until
     /// the user wants it. Restores full layout once a track starts.
+    ///
+    /// We track `currentTrack` (the observation framework can't observe the
+    /// derived `isInAmbientMode` without reading its inputs), but only act when
+    /// the ambient condition actually flips. The transport updates
+    /// `currentTrack` on every poll because `TrackSnapshot.position` advances;
+    /// without this gate the window would re-run its resize/snap pass ~every
+    /// 2 s, which fights an in-progress drag and re-clamps the window. Window
+    /// size depends only on ambient-vs-full, not on which track or how far in.
     private func watchPlayerForAmbientMode() {
         withObservationTracking {
             _ = player.connectionState
             _ = player.currentTrack
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
-                self?.applyWindowSizeForCurrentState()
-                self?.watchPlayerForAmbientMode()
+                guard let self else { return }
+                let ambient = self.isInAmbientMode
+                if ambient != self.lastAppliedAmbient {
+                    self.lastAppliedAmbient = ambient
+                    self.applyWindowSizeForCurrentState()
+                }
+                self.watchPlayerForAmbientMode()
             }
         }
     }
@@ -264,6 +289,9 @@ final class OverlayWindowController: NSObject {
     ///    falls back to centring at the previous window centre.
     private func applyWindowSizeForCurrentState() {
         guard let window = overlayWindow else { return }
+        // Never reposition while the user is dragging — a background poll
+        // firing mid-drag would yank the window out from under the cursor.
+        guard !isUserDragging else { return }
         let theme = themes.current
         let targetAmbient = isInAmbientMode && theme.artworkFrame != nil
 
@@ -282,53 +310,46 @@ final class OverlayWindowController: NSObject {
 
         // Decide next origin.
         var nextOrigin: CGPoint
-        if let corner = currentSnapCorner(window: window),
+        let snap = currentSnapEdges(window: window)
+        if snap.isSnapped,
            let screen = window.screen ?? NSScreen.main {
-            // Preserve the snapped corner across resizes.
-            nextOrigin = origin(for: corner, size: nextSize, on: screen)
+            // Preserve the snapped edge(s) across resizes — including plain
+            // edge snaps (e.g. bottom-centred), not just the four corners.
+            nextOrigin = origin(for: snap, oldFrame: window.frame, size: nextSize, on: screen)
         } else {
-            // Artwork-anchored repositioning.
-            let artworkScreenOrigin: CGPoint = {
-                if windowIsAmbient {
-                    return window.frame.origin
-                } else if let art = theme.artworkFrame {
-                    return CGPoint(
-                        x: window.frame.origin.x + art.minX,
-                        y: window.frame.origin.y + art.minY
-                    )
-                } else {
-                    return CGPoint(x: window.frame.midX, y: window.frame.midY)
-                }
-            }()
-
-            if targetAmbient {
-                nextOrigin = artworkScreenOrigin
-            } else if let art = theme.artworkFrame {
-                nextOrigin = CGPoint(
-                    x: artworkScreenOrigin.x - art.minX,
-                    y: artworkScreenOrigin.y - art.minY
-                )
-            } else {
-                nextOrigin = CGPoint(
-                    x: artworkScreenOrigin.x - nextSize.width / 2,
-                    y: artworkScreenOrigin.y - nextSize.height / 2
-                )
-            }
+            // Not snapped: keep the window centred on the same screen point so
+            // a resize (full ⇄ ambient, theme change) shrinks or grows in
+            // place instead of flinging the window up toward the artwork's old
+            // position.
+            let center = CGPoint(x: window.frame.midX, y: window.frame.midY)
+            nextOrigin = CGPoint(
+                x: center.x - nextSize.width / 2,
+                y: center.y - nextSize.height / 2
+            )
         }
 
-        // Clamp inside the visibleFrame so we never end up off-screen.
+        // Clamp inside the snap frame (physical screen, minus the menu bar) so
+        // we never end up off-screen — but without lifting the window above the
+        // Dock.
         if let screen = window.screen ?? NSScreen.main {
-            let visible = screen.visibleFrame
-            nextOrigin.x = min(max(visible.minX, nextOrigin.x),
-                               visible.maxX - nextSize.width)
-            nextOrigin.y = min(max(visible.minY, nextOrigin.y),
-                               visible.maxY - nextSize.height)
+            let area = snapFrame(for: screen)
+            nextOrigin.x = min(max(area.minX, nextOrigin.x),
+                               area.maxX - nextSize.width)
+            nextOrigin.y = min(max(area.minY, nextOrigin.y),
+                               area.maxY - nextSize.height)
         }
 
+        // Skip the move entirely if nothing changed. `applyWindowSizeForCurrentState`
+        // runs on every poll (the watched `currentTrack` changes as playback
+        // progresses), so without this guard we'd call `setFrame` ~every 2 s
+        // for no reason.
+        let nextFrame = NSRect(origin: nextOrigin, size: nextSize)
+        guard nextFrame != window.frame else {
+            windowIsAmbient = targetAmbient
+            return
+        }
         suppressMoveCallback = true
-        window.setFrame(NSRect(origin: nextOrigin, size: nextSize),
-                        display: true,
-                        animate: true)
+        window.setFrame(nextFrame, display: true, animate: true)
         suppressMoveCallback = false
         windowIsAmbient = targetAmbient
     }
@@ -341,12 +362,12 @@ final class OverlayWindowController: NSObject {
               let saved = settings.overlayPosition(forDisplay: displayID) else {
             return
         }
-        // Clamp against the current visibleFrame in case the screen layout
-        // changed since the saved position was written.
+        // Clamp against the snap frame in case the screen layout changed since
+        // the saved position was written.
         let size = window.frame.size
-        let visible = screen.visibleFrame
-        let clampedX = min(max(visible.minX, saved.x), visible.maxX - size.width)
-        let clampedY = min(max(visible.minY, saved.y), visible.maxY - size.height)
+        let area = snapFrame(for: screen)
+        let clampedX = min(max(area.minX, saved.x), area.maxX - size.width)
+        let clampedY = min(max(area.minY, saved.y), area.maxY - size.height)
         suppressMoveCallback = true
         window.setFrameOrigin(NSPoint(x: clampedX, y: clampedY))
         suppressMoveCallback = false
@@ -357,48 +378,78 @@ final class OverlayWindowController: NSObject {
         return (screen.deviceDescription[key] as? NSNumber)?.uint32Value
     }
 
-    // MARK: - Snap corner detection
+    // MARK: - Snap edge detection
 
-    private enum SnapCorner: CaseIterable {
-        case topLeft, topRight, bottomLeft, bottomRight
+    /// The region the overlay snaps and clamps to: the *physical* screen edges
+    /// (`screen.frame`) so the window can reach the true bottom/left/right
+    /// corners regardless of the Dock — i.e. it behaves the same whether the
+    /// Dock is hidden or always-visible. The only inset is the menu bar at the
+    /// top (`visibleFrame.maxY`), which a window can't sit under anyway.
+    ///
+    /// Snapping/clamping to `visibleFrame` instead is what made the window jump
+    /// *up* above the Dock when dropped near the bottom — the user wants it to
+    /// reach the screen edge, like it does with the Dock hidden.
+    private func snapFrame(for screen: NSScreen) -> NSRect {
+        let full = screen.frame
+        let topInset = full.maxY - screen.visibleFrame.maxY
+        return NSRect(x: full.minX, y: full.minY,
+                      width: full.width, height: full.height - topInset)
     }
 
-    /// Returns the corner the window is currently pinned against, if any.
+    /// Which edges of the snap frame the window is currently pinned against.
+    /// Captures plain edge snaps (e.g. the window resting on the bottom edge
+    /// while horizontally centred), not just the four corners — `snapToEdgesIfClose`
+    /// snaps each axis independently, so an edge-only snap is a real state we
+    /// have to preserve across resizes.
+    private struct SnapEdges {
+        var left = false
+        var right = false
+        var bottom = false
+        var top = false
+        var isSnapped: Bool { left || right || bottom || top }
+    }
+
+    /// Returns the edges the window is currently pinned against, if any.
     /// Tolerates up to 6 pt drift so that a snap performed during a drag
     /// (which uses the 40 pt threshold but does not produce sub-pixel
     /// precision) still counts as snapped.
-    private func currentSnapCorner(window: NSWindow) -> SnapCorner? {
-        guard let screen = window.screen ?? NSScreen.main else { return nil }
-        let visible = screen.visibleFrame
+    private func currentSnapEdges(window: NSWindow) -> SnapEdges {
+        guard let screen = window.screen ?? NSScreen.main else { return SnapEdges() }
+        let area = snapFrame(for: screen)
         let frame = window.frame
         let threshold: CGFloat = 6
 
-        let onLeft = abs(frame.minX - visible.minX) <= threshold
-        let onRight = abs(frame.maxX - visible.maxX) <= threshold
-        let onBottom = abs(frame.minY - visible.minY) <= threshold
-        let onTop = abs(frame.maxY - visible.maxY) <= threshold
-
-        switch (onTop, onBottom, onLeft, onRight) {
-        case (true, _, true, _):   return .topLeft
-        case (true, _, _, true):   return .topRight
-        case (_, true, true, _):   return .bottomLeft
-        case (_, true, _, true):   return .bottomRight
-        default:                   return nil
-        }
+        return SnapEdges(
+            left: abs(frame.minX - area.minX) <= threshold,
+            right: abs(frame.maxX - area.maxX) <= threshold,
+            bottom: abs(frame.minY - area.minY) <= threshold,
+            top: abs(frame.maxY - area.maxY) <= threshold
+        )
     }
 
-    private func origin(for corner: SnapCorner, size: CGSize, on screen: NSScreen) -> CGPoint {
-        let visible = screen.visibleFrame
-        switch corner {
-        case .topLeft:
-            return CGPoint(x: visible.minX, y: visible.maxY - size.height)
-        case .topRight:
-            return CGPoint(x: visible.maxX - size.width, y: visible.maxY - size.height)
-        case .bottomLeft:
-            return CGPoint(x: visible.minX, y: visible.minY)
-        case .bottomRight:
-            return CGPoint(x: visible.maxX - size.width, y: visible.minY)
+    /// Origin that keeps every snapped edge pinned after a resize. Axes with
+    /// no snap preserve the previous window centre on that axis, so an
+    /// edge-snapped window stays glued to its edge while staying put along the
+    /// free axis (e.g. bottom-centred stays bottom-centred).
+    private func origin(for snap: SnapEdges, oldFrame: NSRect, size: CGSize, on screen: NSScreen) -> CGPoint {
+        let area = snapFrame(for: screen)
+        let x: CGFloat
+        if snap.left {
+            x = area.minX
+        } else if snap.right {
+            x = area.maxX - size.width
+        } else {
+            x = oldFrame.midX - size.width / 2
         }
+        let y: CGFloat
+        if snap.bottom {
+            y = area.minY
+        } else if snap.top {
+            y = area.maxY - size.height
+        } else {
+            y = oldFrame.midY - size.height / 2
+        }
+        return CGPoint(x: x, y: y)
     }
 
     /// Snap to corners and edges within 40pt of the current screen's
@@ -407,21 +458,26 @@ final class OverlayWindowController: NSObject {
     /// loop.
     private func snapToEdgesIfClose(_ window: NSWindow) {
         guard let screen = window.screen else { return }
-        let visible = screen.visibleFrame
+        let area = snapFrame(for: screen)
         let threshold: CGFloat = 40
         var origin = window.frame.origin
         let size = window.frame.size
 
-        if abs(origin.x - visible.minX) < threshold {
-            origin.x = visible.minX
-        } else if abs(visible.maxX - (origin.x + size.width)) < threshold {
-            origin.x = visible.maxX - size.width
+        // Snap when the window is within `threshold` of a screen edge *or past
+        // it* (dragged off-screen). One-sided so a window shoved past an edge is
+        // pulled flush to that edge. `area` uses the physical screen frame, so
+        // the bottom edge is the true screen bottom (y = 0) — not above the
+        // Dock — which is what stops the "jumps up above the Dock" behaviour.
+        if origin.x < area.minX + threshold {
+            origin.x = area.minX
+        } else if origin.x + size.width > area.maxX - threshold {
+            origin.x = area.maxX - size.width
         }
 
-        if abs(origin.y - visible.minY) < threshold {
-            origin.y = visible.minY
-        } else if abs(visible.maxY - (origin.y + size.height)) < threshold {
-            origin.y = visible.maxY - size.height
+        if origin.y < area.minY + threshold {
+            origin.y = area.minY
+        } else if origin.y + size.height > area.maxY - threshold {
+            origin.y = area.maxY - size.height
         }
 
         if origin != window.frame.origin {
@@ -439,6 +495,23 @@ extension OverlayWindowController: NSWindowDelegate {
         guard !suppressMoveCallback,
               let window = notification.object as? NSWindow,
               window == overlayWindow else { return }
+        // A user drag is in progress. Block poll-driven repositioning, and
+        // debounce the snap so it runs once movement stops (i.e. on release),
+        // never mid-drag.
+        isUserDragging = true
+        dragSettleTask?.cancel()
+        dragSettleTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            guard !Task.isCancelled, let self else { return }
+            self.isUserDragging = false
+            self.handleDragEnded()
+        }
+    }
+
+    /// Called once window movement settles. Snaps to nearby/overrun edges and
+    /// persists the resulting position.
+    func handleDragEnded() {
+        guard let window = overlayWindow else { return }
         snapToEdgesIfClose(window)
         if let screen = window.screen,
            let displayID = Self.displayID(of: screen) {
