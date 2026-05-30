@@ -170,14 +170,30 @@ final class PlayerStore {
         }
     }
 
-    /// Convenience for transient lifecycle states (connecting, errors) that
-    /// do not carry a snapshot.
+    /// Convenience for transient lifecycle states (connecting, reconnecting,
+    /// errors) that do not carry a snapshot.
     func updateConnection(_ state: ConnectionState) {
+        // The poller re-emits `.reconnecting` on every failed tick; skip the
+        // no-op assignment so we don't churn the Observation graph.
+        guard connectionState != state else { return }
         connectionState = state
+        // A hard error wipes the now-playing context (it isn't coming back
+        // without user action). `.reconnecting` deliberately does NOT: the
+        // overlay keeps the last track dimmed so the user has continuity while
+        // the link heals on its own.
         if case .error = state {
             currentTrack = nil
             isPaused = false
         }
+    }
+
+    /// True only when the link is live enough to accept playback commands. The
+    /// transport controls and seek/favorite gate on this so a press while the
+    /// server is unreachable shows a one-line hint instead of firing a request
+    /// that fails with a raw transport error.
+    var isLinkLive: Bool {
+        if case .connected = connectionState { return true }
+        return false
     }
 
     /// Apply a fresh `[Session]` from any source (polling or WebSocket).
@@ -288,7 +304,19 @@ final class PlayerStore {
 
     // MARK: Commands
 
+    /// One-line, user-facing reason the controls are inert, tailored to why the
+    /// link is down. Never leaks transport internals.
+    private var unreachableHint: String {
+        if case .reconnecting(let isOffline) = connectionState {
+            return isOffline ? "You're offline" : "Reconnecting to the server…"
+        }
+        return "Can't reach the server right now."
+    }
+
     func playPause() async {
+        // Don't fire a doomed command (and the raw-error toast that follows)
+        // when the link is down — tell the user why nothing happened instead.
+        guard isLinkLive else { showTransient(unreachableHint); return }
         // Optimistic UI: flip the icon at the press so latency is hidden.
         // The server's eventual confirmation through the poll either ratifies
         // (no visible change) or, if the command failed silently somewhere,
@@ -320,6 +348,7 @@ final class PlayerStore {
     }
 
     func nextTrack() async {
+        guard isLinkLive else { showTransient(unreachableHint); return }
         flashFeedback(.next)
         await sendCommand(name: "next") { client, sessionId in
             try await client.nextTrack(sessionId: sessionId)
@@ -327,6 +356,7 @@ final class PlayerStore {
     }
 
     func previousTrack() async {
+        guard isLinkLive else { showTransient(unreachableHint); return }
         flashFeedback(.previous)
         await sendCommand(name: "previous") { client, sessionId in
             try await client.previousTrack(sessionId: sessionId)
@@ -337,6 +367,7 @@ final class PlayerStore {
     /// Updates the local snapshot optimistically so the progress bar moves
     /// before the WebSocket pushes the new state back from the server.
     func seek(toSeconds seconds: Double) async {
+        guard isLinkLive else { showTransient(unreachableHint); return }
         guard let client else { return }
         guard let current = currentTrack else { return }
         let target = max(0, seconds)
@@ -374,6 +405,7 @@ final class PlayerStore {
     /// server. On failure it reverts (only if the same track is still showing)
     /// and surfaces a toast.
     func toggleFavorite() async {
+        guard isLinkLive else { showTransient(unreachableHint); return }
         guard let client else { return }
         guard let current = currentTrack else { return }
         // Drop overlapping toggles so a double-click doesn't fire two opposite

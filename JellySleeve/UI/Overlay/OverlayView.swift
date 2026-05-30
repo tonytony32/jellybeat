@@ -88,6 +88,23 @@ struct OverlayView: View {
             IdleStateView(openSettings: openSettings)
         case .error(let message):
             ErrorStateView(message: message, openSettings: openSettings)
+        case .reconnecting(let isOffline):
+            if let track = player.currentTrack {
+                // Keep the last track on screen for continuity, but dimmed and
+                // topped with a quiet badge so it reads as "paused link, not a
+                // crash". Controls are gated in PlayerStore, so a press here
+                // just surfaces the reconnecting hint.
+                themes.current.body(track: track, store: player)
+                    .id(themes.current.id)
+                    .opacity(0.4)
+                    .overlay(alignment: .top) {
+                        ReconnectingBadge(isOffline: isOffline)
+                            .padding(.top, 8)
+                    }
+                    .transition(.opacity)
+            } else {
+                ReconnectingStateView(isOffline: isOffline)
+            }
         case .connecting, .connected:
             if let track = player.currentTrack {
                 themes.current.body(track: track, store: player)
@@ -149,6 +166,58 @@ private struct ErrorStateView: View {
                 .buttonStyle(.bordered)
         }
         .padding(16)
+    }
+}
+
+/// Quiet pill floated over the (dimmed) last track while the link is down and
+/// the poller is retrying. Mirrors the transient toast's capsule treatment so
+/// it reads as part of the overlay chrome, not an alert.
+private struct ReconnectingBadge: View {
+    let isOffline: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ProgressView()
+                .controlSize(.small)
+                .scaleEffect(0.7)
+            Text(isOffline ? "Offline" : "Reconnecting…")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background {
+            Capsule().fill(.ultraThinMaterial)
+                .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 1)
+        }
+    }
+}
+
+/// Shown when the link drops while nothing is playing (no track to dim). Gentle
+/// on purpose: this is a transient, self-healing state, so — unlike
+/// `ErrorStateView` — there's no red triangle and no "Open Settings" (the
+/// config is fine; the server is just temporarily unreachable).
+private struct ReconnectingStateView: View {
+    let isOffline: Bool
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: isOffline ? "wifi.slash" : "antenna.radiowaves.left.and.right.slash")
+                .font(.system(size: 26, weight: .light))
+                .foregroundStyle(.secondary)
+            Text(isOffline ? "You're offline" : "Lost connection to the server")
+                .font(.callout)
+                .multilineTextAlignment(.center)
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.8)
+                Text("Reconnecting…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(20)
     }
 }
 

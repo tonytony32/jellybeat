@@ -29,7 +29,8 @@ struct PlayerStoreTests {
                 albumArtist: "Artist",
                 album: "Album",
                 runTimeTicks: 1_800_000_000,
-                imageTags: nil
+                imageTags: nil,
+                userData: nil
             ),
             playState: PlayState(positionTicks: 0, isPaused: isPaused, volumeLevel: 80)
         )
@@ -84,5 +85,70 @@ struct PlayerStoreTests {
         )
         #expect(store.currentTrack != nil)
         #expect(store.isPaused == false)
+    }
+
+    // MARK: - Reconnecting / link-down behaviour
+
+    /// Dropping into `.reconnecting` must KEEP the last track on screen (unlike
+    /// `.error`, which wipes it) so the overlay can dim it and recover in place
+    /// when the server comes back.
+    @Test
+    func reconnectingPreservesCurrentTrack() {
+        let store = PlayerStore()
+        store.ingest(
+            sessions: [session(id: "s1", secondsSinceActivity: 2, isPaused: false)],
+            userId: Self.userId
+        )
+        #expect(store.currentTrack != nil)
+
+        store.updateConnection(.reconnecting(isOffline: false))
+        #expect(store.currentTrack != nil)
+        #expect(store.isLinkLive == false)
+    }
+
+    /// A hard error, by contrast, clears the track and pause state.
+    @Test
+    func errorClearsCurrentTrack() {
+        let store = PlayerStore()
+        store.ingest(
+            sessions: [session(id: "s1", secondsSinceActivity: 2, isPaused: false)],
+            userId: Self.userId
+        )
+        store.updateConnection(.error("Unauthorized — check your API key."))
+        #expect(store.currentTrack == nil)
+        #expect(store.isLinkLive == false)
+    }
+
+    /// Pressing play/pause while the link is down must NOT fire a doomed
+    /// command. It should leave the optimistic pause state untouched and
+    /// surface a one-line hint instead of a raw transport error.
+    @Test
+    func playPauseIsInertWhileReconnecting() async {
+        let store = PlayerStore()
+        store.ingest(
+            sessions: [session(id: "s1", secondsSinceActivity: 2, isPaused: false)],
+            userId: Self.userId
+        )
+        store.updateConnection(.reconnecting(isOffline: false))
+        let pausedBefore = store.isPaused
+
+        await store.playPause()
+
+        #expect(store.isPaused == pausedBefore)
+        #expect(store.transientMessage == "Reconnecting to the server…")
+    }
+
+    /// The offline variant tailors the hint copy.
+    @Test
+    func commandHintReflectsOfflineState() async {
+        let store = PlayerStore()
+        store.ingest(
+            sessions: [session(id: "s1", secondsSinceActivity: 2, isPaused: false)],
+            userId: Self.userId
+        )
+        store.updateConnection(.reconnecting(isOffline: true))
+
+        await store.nextTrack()
+        #expect(store.transientMessage == "You're offline")
     }
 }
