@@ -145,8 +145,10 @@ private struct TransientToastView: View {
 }
 
 /// Ambient idle state: the window shrinks to artwork-size (see
-/// `AppDelegate.applyWindowSizeForCurrentState`), the contents are hidden,
-/// and a hover reveals a "Open Jellyfin" affordance. Tapping launches the
+/// `AppDelegate.applyWindowSizeForCurrentState`) and shows a large Jellyfin
+/// logo as a launch affordance. The logo stays visible at all times but at a
+/// subtle, low opacity; hovering brings it to full strength (and the
+/// surrounding glass fades in via `chromeOpacity`). Tapping launches the
 /// configured Jellyfin URL via `NSWorkspace.open`, which on macOS picks the
 /// user's chosen handler — useful when the user has registered a Safari
 /// "Add to Dock" web app for the Jellyfin URL.
@@ -156,21 +158,25 @@ private struct NothingPlayingView: View {
     let onLaunch: () -> Void
 
     var body: some View {
-        ZStack {
-            Color.clear.contentShape(Rectangle())
+        GeometryReader { geo in
+            // Scale the logo to the ambient window so it reads as "a bigger
+            // icon" across themes whose artwork sizes differ (Classic 120 →
+            // Standard/Aero ~256).
+            let side = min(geo.size.width, geo.size.height) * 0.5
 
-            VStack(spacing: 10) {
+            ZStack {
+                Color.clear.contentShape(Rectangle())
+
                 Image("JellyfinLogo")
                     .renderingMode(.template)
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 42, height: 42)
-                Text("Open Jellyfin")
-                    .font(.caption)
+                    .frame(width: side, height: side)
+                    .foregroundStyle(.secondary)
+                    .opacity(isHovering ? 0.95 : 0.35)
+                    .scaleEffect(isHovering ? 1.0 : 0.97)
             }
-            .foregroundStyle(.secondary)
-            .opacity(isHovering ? 0.85 : 0.0)
-            .scaleEffect(isHovering ? 1.0 : 0.95)
+            .frame(width: geo.size.width, height: geo.size.height)
         }
         .onHover { isHovering = $0 }
         .onTapGesture {
