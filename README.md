@@ -99,6 +99,7 @@ JellySleeve/                  # Sources
 JellySleeveTests/             # Swift Testing target with Jellyfin response fixtures
 docs/
   PLAN.md                     # The implementation plan this project followed
+  BEST_PRACTICES.md           # Architecture + best-practices guide for a rebuild
 LICENSE                       # MIT
 ```
 
