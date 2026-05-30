@@ -28,6 +28,11 @@ final class PlayerStore {
     var currentTrack: TrackSnapshot? = nil
     var isPaused: Bool = false
 
+    /// The active client's play queue (current track + up next), surfaced in
+    /// the controls' queue popover. Empty when the playing client doesn't
+    /// report one. Cleared alongside `currentTrack` when playback stops.
+    var queue: [QueueItem] = []
+
     /// Output volume (0...100) of the active client, as last reported by the
     /// poll or set optimistically via `nudgeVolume`. Drives the scroll-to-
     /// change-volume interaction and its on-overlay readout.
@@ -140,7 +145,8 @@ final class PlayerStore {
         track: TrackSnapshot?,
         isPaused: Bool,
         volume: Int?,
-        sessions: [SessionSummary]
+        sessions: [SessionSummary],
+        queue: [QueueItem] = []
     ) {
         if self.connectionState != connectionState { self.connectionState = connectionState }
         // Optimistic-update protection: if a command was issued in the last
@@ -186,6 +192,7 @@ final class PlayerStore {
             // Music arrived — drop the "expecting music" hint.
             anticipating = false
             anticipatingTask?.cancel()
+            if self.queue != queue { self.queue = queue }
             if isNewItem { refreshFavorite(for: track.itemId) }
         } else if currentTrack != nil {
             clearTrackTask?.cancel()
@@ -193,6 +200,7 @@ final class PlayerStore {
                 try? await Task.sleep(nanoseconds: Self.trackClearDebounce)
                 guard !Task.isCancelled else { return }
                 self?.currentTrack = nil
+                self?.queue = []
             }
         }
 
@@ -217,6 +225,7 @@ final class PlayerStore {
         if case .error = state {
             currentTrack = nil
             isPaused = false
+            queue = []
         }
     }
 
@@ -289,13 +298,15 @@ final class PlayerStore {
         let pausedFromServer = pick?.playState?.isPaused ?? false
         let volumeFromServer = pick?.playState?.volumeLevel
         let summaries = Self.summaries(of: sessions, userId: userId)
+        let queue = pick.map { Self.makeQueue(from: $0) } ?? []
 
         apply(
             connectionState: .connected,
             track: snapshot,
             isPaused: pausedFromServer,
             volume: volumeFromServer,
-            sessions: summaries
+            sessions: summaries,
+            queue: queue
         )
     }
 
@@ -317,6 +328,29 @@ final class PlayerStore {
             sessionId: session.id,
             isFavorite: item.userData?.isFavorite ?? false
         )
+    }
+
+    /// Build the queue preview from a session's `NowPlayingQueueFullItems`,
+    /// flagging the row that matches the current `NowPlayingItem`. Returns an
+    /// empty array when the client doesn't report a queue.
+    private static func makeQueue(from session: Session) -> [QueueItem] {
+        guard let items = session.nowPlayingQueueFullItems, !items.isEmpty else {
+            return []
+        }
+        let currentId = session.nowPlayingItem?.id
+        return items.enumerated().map { index, item in
+            let artist = item.albumArtist
+                ?? item.artists?.joined(separator: ", ")
+                ?? "Unknown artist"
+            return QueueItem(
+                id: "\(index)::\(item.id)",
+                itemId: item.id,
+                imageTag: item.imageTags?.primary,
+                title: item.name,
+                artist: artist,
+                isCurrent: item.id == currentId
+            )
+        }
     }
 
     private static func summaries(of sessions: [Session], userId: String) -> [SessionSummary] {

@@ -11,6 +11,11 @@ nonisolated struct Session: Codable, Sendable, Equatable, Identifiable {
     let lastActivityDate: Date?
     let nowPlayingItem: NowPlayingItem?
     let playState: PlayState?
+    /// The client's full play queue (current track + what's up next), if the
+    /// playing client reports one. Jellyfin embeds it in the same `/Sessions`
+    /// reply, so the overlay's queue popover needs no extra request. Often nil
+    /// for clients that don't push their queue (or for a single loose track).
+    let nowPlayingQueueFullItems: [NowPlayingItem]?
 
     enum CodingKeys: String, CodingKey {
         case id = "Id"
@@ -20,5 +25,6 @@ nonisolated struct Session: Codable, Sendable, Equatable, Identifiable {
         case lastActivityDate = "LastActivityDate"
         case nowPlayingItem = "NowPlayingItem"
         case playState = "PlayState"
+        case nowPlayingQueueFullItems = "NowPlayingQueueFullItems"
     }
 }

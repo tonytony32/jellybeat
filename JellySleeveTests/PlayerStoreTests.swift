@@ -32,7 +32,8 @@ struct PlayerStoreTests {
                 imageTags: nil,
                 userData: nil
             ),
-            playState: PlayState(positionTicks: 0, isPaused: isPaused, volumeLevel: 80)
+            playState: PlayState(positionTicks: 0, isPaused: isPaused, volumeLevel: 80),
+            nowPlayingQueueFullItems: nil
         )
     }
 
@@ -85,6 +86,42 @@ struct PlayerStoreTests {
         )
         #expect(store.currentTrack != nil)
         #expect(store.isPaused == false)
+    }
+
+    /// `NowPlayingQueueFullItems` is surfaced as `store.queue`, in order, with
+    /// the entry matching the current `NowPlayingItem` flagged `isCurrent`.
+    @Test
+    func ingestSurfacesQueueWithCurrentFlag() {
+        func item(_ id: String, _ name: String) -> NowPlayingItem {
+            NowPlayingItem(
+                id: id, name: name, artists: ["Artist"], albumArtist: "Artist",
+                album: "Album", runTimeTicks: 1_800_000_000, imageTags: nil, userData: nil
+            )
+        }
+        let queueItems = [item("a", "First"), item("b", "Current"), item("c", "Next")]
+        let session = Session(
+            id: "s1", userId: Self.userId, client: "Jellyfin Web",
+            deviceName: "Test", lastActivityDate: Date(),
+            nowPlayingItem: item("b", "Current"),
+            playState: PlayState(positionTicks: 0, isPaused: false, volumeLevel: 80),
+            nowPlayingQueueFullItems: queueItems
+        )
+        let store = PlayerStore()
+        store.ingest(sessions: [session], userId: Self.userId)
+
+        #expect(store.queue.map(\.title) == ["First", "Current", "Next"])
+        #expect(store.queue.filter(\.isCurrent).map(\.title) == ["Current"])
+    }
+
+    /// A session without a reported queue leaves `store.queue` empty.
+    @Test
+    func ingestLeavesQueueEmptyWhenNotReported() {
+        let store = PlayerStore()
+        store.ingest(
+            sessions: [session(id: "s1", secondsSinceActivity: 2, isPaused: false)],
+            userId: Self.userId
+        )
+        #expect(store.queue.isEmpty)
     }
 
     // MARK: - Reconnecting / link-down behaviour
