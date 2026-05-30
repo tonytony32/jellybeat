@@ -29,6 +29,14 @@ nonisolated enum Endpoints {
         "/Sessions/\(sessionId)/Playing/Seek"
     }
 
+    /// General command sink for a session. Takes a `GeneralCommand` JSON body
+    /// (`Name` + `Arguments`); used for `SetVolume`, which — unlike the
+    /// transport commands — needs an argument and so can't use the simpler
+    /// `/Command/{name}` path.
+    static func sessionCommand(sessionId: String) -> String {
+        "/Sessions/\(sessionId)/Command"
+    }
+
     /// Per-user favorite flag for an item. `POST` marks it as a favorite,
     /// `DELETE` clears it. Both return the item's `UserItemDataDto`.
     static func userFavoriteItem(userId: String, itemId: String) -> String {
