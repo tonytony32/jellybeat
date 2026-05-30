@@ -13,7 +13,7 @@ struct ClassicTheme: OverlayTheme {
         orientation: .horizontal,
         artworkSize: 120,
         controlsPosition: .below,
-        windowSize: CGSize(width: 380, height: 140),
+        windowSize: CGSize(width: 380, height: 160),
         padding: 10,
         cornerRadius: 14
     )
