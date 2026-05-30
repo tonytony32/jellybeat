@@ -30,6 +30,11 @@ struct ProgressBarView: View {
     @State private var displayedSeconds: Double = 0
     @State private var seekedAt: Date? = nil
     @State private var isHovering: Bool = false
+    /// Stays `false` for the very first render so the initial position and
+    /// height snap into place instead of animating in. Without this the bar
+    /// sweeps its fill from 0 → current position and grows 4 → 6 pt the first
+    /// time, reading as a "bounce" on first interaction.
+    @State private var hasAppeared: Bool = false
 
     private var totalSeconds: Double {
         max(0, Self.seconds(of: runtime))
@@ -57,6 +62,13 @@ struct ProgressBarView: View {
     private var reservedHeight: CGFloat {
         onSeek != nil ? height + extraHoverHeight : height
     }
+
+    /// Invisible vertical reach added above and below the bar so the thin
+    /// 4–6 pt track is easy to hit "by proximity" — the pointer activates the
+    /// bar (hover + tap-to-seek) a little before it strictly overlaps it. Only
+    /// applied to the interactive area, not the visual, and compensated with
+    /// negative padding so the layout footprint stays `reservedHeight`.
+    private let hitSlop: CGFloat = 8
 
     var body: some View {
         GeometryReader { proxy in
@@ -88,7 +100,12 @@ struct ProgressBarView: View {
                 }
             }
         }
-        .frame(height: reservedHeight)
+        // Grow the GeometryReader vertically so contentShape, the seek
+        // gesture, onHover and the cursor tracking area all extend `hitSlop`
+        // beyond the bar, then pull the layout box back so the bar's visual
+        // position and the surrounding elements don't move.
+        .frame(height: reservedHeight + hitSlop * 2)
+        .padding(.vertical, -hitSlop)
         .accessibilityElement()
         .accessibilityLabel(String(localized: "Track progress"))
         .accessibilityValue(String(format: "%.0f%%", fraction * 100))
@@ -97,15 +114,22 @@ struct ProgressBarView: View {
             seekedAt = nil
         }
         .onChange(of: reportedSeconds) { _, newValue in
-            // Inside the post-seek grace window, drop server pushes whose
-            // value is still the pre-seek position (more than 3 s away from
-            // what the user asked for). Close values are the server's
-            // confirmation: accept and end the grace.
-            if let seekedAt, Date().timeIntervalSince(seekedAt) < 2.0 {
-                if abs(newValue - displayedSeconds) > 3.0 {
-                    return
-                }
-                self.seekedAt = nil
+            // Inside the post-seek grace window, drop any push that is still
+            // far from where the user seeked to — those are stale pre-seek
+            // positions the server keeps reporting (and which `forceRefresh`
+            // can race in) until it processes our seek.
+            //
+            // We deliberately do NOT end the grace early on the first close
+            // value. `store.seek` applies an optimistic update that sets the
+            // position to the seek target, so the very first push we observe
+            // equals `displayedSeconds` (delta 0). Ending the grace there —
+            // as the previous code did — reopened the window just in time for
+            // the stale server polls that follow, making the bar bounce back
+            // to the old position before the real confirmation arrived. The
+            // 2 s timer is the sole gate; a new seek or track change resets it.
+            if let seekedAt, Date().timeIntervalSince(seekedAt) < 2.0,
+               abs(newValue - displayedSeconds) > 3.0 {
+                return
             }
             displayedSeconds = newValue
         }
@@ -120,8 +144,16 @@ struct ProgressBarView: View {
                 displayedSeconds = min(totalSeconds, displayedSeconds + 0.2)
             }
         }
-        .animation(.linear(duration: 0.2), value: displayedSeconds)
-        .animation(.easeInOut(duration: 0.15), value: renderedHeight)
+        .onAppear {
+            // Defer enabling animations until after the initial position and
+            // height have been applied (the `onChange(initial: true)` above
+            // runs during this same appearance pass). Flipping on the next
+            // runloop guarantees that first assignment is not animated, so the
+            // bar starts in place rather than sweeping/bouncing in.
+            DispatchQueue.main.async { hasAppeared = true }
+        }
+        .animation(hasAppeared ? .linear(duration: 0.2) : nil, value: displayedSeconds)
+        .animation(hasAppeared ? .easeInOut(duration: 0.15) : nil, value: renderedHeight)
     }
 
     private func seekGesture(width: CGFloat) -> some Gesture {
