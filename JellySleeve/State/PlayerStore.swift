@@ -310,11 +310,23 @@ final class PlayerStore {
         )
     }
 
+    /// Resolve the friendliest artist label for an item, preferring the
+    /// track-level `Artists` over the single `AlbumArtist` so the actual
+    /// performer of the song shows through (e.g. featured guests or the
+    /// individual artists on a compilation), not the album's headline artist.
+    private static func artistLabel(for item: NowPlayingItem) -> String {
+        if let trackArtist = item.artists?.joined(separator: ", "), !trackArtist.isEmpty {
+            return trackArtist
+        }
+        if let albumArtist = item.albumArtist, !albumArtist.isEmpty {
+            return albumArtist
+        }
+        return "Unknown artist"
+    }
+
     private static func makeSnapshot(from session: Session) -> TrackSnapshot? {
         guard let item = session.nowPlayingItem else { return nil }
-        let artist = item.albumArtist
-            ?? item.artists?.joined(separator: ", ")
-            ?? "Unknown artist"
+        let artist = artistLabel(for: item)
         let runtimeSeconds = Double(item.runTimeTicks ?? 0) / 10_000_000
         let positionSeconds = Double(session.playState?.positionTicks ?? 0) / 10_000_000
         return TrackSnapshot(
@@ -339,9 +351,7 @@ final class PlayerStore {
         }
         let currentId = session.nowPlayingItem?.id
         return items.enumerated().map { index, item in
-            let artist = item.albumArtist
-                ?? item.artists?.joined(separator: ", ")
-                ?? "Unknown artist"
+            let artist = artistLabel(for: item)
             return QueueItem(
                 id: "\(index)::\(item.id)",
                 itemId: item.id,

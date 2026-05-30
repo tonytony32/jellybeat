@@ -124,6 +124,65 @@ struct PlayerStoreTests {
         #expect(store.queue.isEmpty)
     }
 
+    // MARK: - Artist resolution
+
+    private func sessionWithArtists(
+        artists: [String]?,
+        albumArtist: String?
+    ) -> Session {
+        let item = NowPlayingItem(
+            id: "item-1",
+            name: "Track",
+            artists: artists,
+            albumArtist: albumArtist,
+            album: "Album",
+            runTimeTicks: 1_800_000_000,
+            imageTags: nil,
+            userData: nil
+        )
+        return Session(
+            id: "s1",
+            userId: Self.userId,
+            client: "Jellyfin Web",
+            deviceName: "Test",
+            lastActivityDate: Date(),
+            nowPlayingItem: item,
+            playState: PlayState(positionTicks: 0, isPaused: false, volumeLevel: 80),
+            nowPlayingQueueFullItems: [item]
+        )
+    }
+
+    /// The displayed artist must be the song's own performer (Jellyfin's
+    /// `Artists`), not the album's headline artist (`AlbumArtist`). On a
+    /// compilation or a track with a featured guest these differ, and the
+    /// track-level credit is the one the listener expects to see — in both the
+    /// now-playing readout and the queue.
+    @Test
+    func prefersTrackArtistOverAlbumArtist() {
+        let store = PlayerStore()
+        store.ingest(
+            sessions: [sessionWithArtists(
+                artists: ["Song Artist", "Featured Guest"],
+                albumArtist: "Album Artist"
+            )],
+            userId: Self.userId
+        )
+        #expect(store.currentTrack?.artist == "Song Artist, Featured Guest")
+        #expect(store.queue.first?.artist == "Song Artist, Featured Guest")
+    }
+
+    /// With no track-level `Artists`, fall back to `AlbumArtist` rather than
+    /// showing "Unknown artist". An empty `Artists` array counts as absent.
+    @Test
+    func fallsBackToAlbumArtistWhenNoTrackArtist() {
+        let store = PlayerStore()
+        store.ingest(
+            sessions: [sessionWithArtists(artists: [], albumArtist: "Album Artist")],
+            userId: Self.userId
+        )
+        #expect(store.currentTrack?.artist == "Album Artist")
+    }
+
     // MARK: - Reconnecting / link-down behaviour
 
     /// Dropping into `.reconnecting` must KEEP the last track on screen (unlike
