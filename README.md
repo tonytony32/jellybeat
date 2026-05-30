@@ -90,17 +90,44 @@ version means you're good.
 ```
 JellySleeve.xcodeproj/        # Xcode project + shared scheme
 JellySleeve/                  # Sources
-  App/                        # NSApplicationDelegateAdaptor, NSWindow, MediaCenter
+  App/                        # App entry + coordinators (window, connection), MediaCenter
   Networking/                 # JellyfinClient, JellyfinSocketClient, models
-  State/                      # PlayerStore, SettingsStore, KeychainHelper
+  State/                      # PlayerStore, SettingsStore, poller, caches, KeychainHelper
   UI/                         # OverlayView, themes, Settings tabs, components
   Assets.xcassets             # AppIcon, AccentColor, JellyfinLogo
   Resources/                  # placeholder
-JellySleeveTests/             # XCTest target with Jellyfin response fixtures
+JellySleeveTests/             # Swift Testing target with Jellyfin response fixtures
 docs/
   PLAN.md                     # The implementation plan this project followed
 LICENSE                       # MIT
 ```
+
+### Architecture
+
+The app layer is a thin coordinator over two focused collaborators rather
+than one catch-all delegate:
+
+- **`AppDelegate`** — owns the shared stores (`SettingsStore`, `PlayerStore`,
+  `ThemeRegistry`, `ArtworkCacheProvider`) and wires the collaborators
+  together. It holds almost no logic of its own.
+- **`OverlayWindowController`** — all window geometry: creating the borderless
+  window, applying level/opacity, the theme- and player-driven resize between
+  the full and ambient layouts, edge/corner snapping, and per-display position
+  persistence.
+- **`PlaybackConnectionCoordinator`** — the playback-feed state machine:
+  WebSocket-preferred transport with REST-polling fallback, the reconnection
+  policy, sleep/wake handling, and the debounced reconfigure when connection
+  settings change.
+
+Window-visibility events that should pause or resume the feed (miniaturise,
+close, deminiaturise) flow from the window controller to the connection
+coordinator through closures, so neither holds a direct reference to the other.
+
+Data flows one way up the layers — **Networking → State → UI**. The transport
+clients decode raw models; `PlayerStore` runs the active-session heuristic and
+holds the single source of truth for the overlay; the SwiftUI views and themes
+read it. The shared transport vocabulary (`PlaybackAction`) lives in the State
+layer so the store never depends on a view type.
 
 ## Tests
 
