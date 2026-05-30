@@ -151,7 +151,47 @@ nonisolated struct JellyfinClient: Sendable {
         try validate(response)
     }
 
+    /// Mark or clear the favorite flag for `itemId` on the configured user.
+    /// Jellyfin uses `POST` to favorite and `DELETE` to un-favorite the item.
+    /// Both return a `UserItemDataDto`; we decode the resulting `IsFavorite` so
+    /// the caller can trust the server's view rather than its own optimistic
+    /// guess. Falls back to the requested value if the body can't be decoded.
+    @discardableResult
+    func setFavorite(itemId: String, isFavorite: Bool) async throws -> Bool {
+        let path = Endpoints.userFavoriteItem(
+            userId: configuration.userId,
+            itemId: itemId
+        )
+        let request = try makeRequest(
+            path: path,
+            method: isFavorite ? "POST" : "DELETE"
+        )
+        let (data, response) = try await send(request, on: controlSession)
+        try validate(response)
+        if let dto = try? Self.makeDecoder().decode(NowPlayingItem.UserData.self, from: data) {
+            return dto.isFavorite ?? isFavorite
+        }
+        return isFavorite
+    }
+
+    /// Read the authoritative favorite state for `itemId`. Used on track change
+    /// because `/Sessions` doesn't reliably include `UserData` on the
+    /// `NowPlayingItem`, so the heart can't be seeded from the poll alone.
+    func fetchFavorite(itemId: String) async throws -> Bool {
+        let path = Endpoints.userItem(userId: configuration.userId, itemId: itemId)
+        let item: ItemUserDataEnvelope = try await get(path, session: controlSession)
+        return item.userData?.isFavorite ?? false
+    }
+
     // MARK: - Internals
+
+    /// Minimal decode target for `userItem`: we only care about `UserData`.
+    private struct ItemUserDataEnvelope: Decodable, Sendable {
+        let userData: NowPlayingItem.UserData?
+        enum CodingKeys: String, CodingKey {
+            case userData = "UserData"
+        }
+    }
 
     private func get<T: Decodable & Sendable>(
         _ path: String,

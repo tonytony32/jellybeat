@@ -71,6 +71,11 @@ final class PlayerStore {
 
     private var transientTask: Task<Void, Never>?
     private var clearTrackTask: Task<Void, Never>?
+    /// Authoritative favorite lookup fired on track change (the poll can't be
+    /// trusted for this field). Cancelled when the track changes again.
+    private var favoriteRefreshTask: Task<Void, Never>?
+    /// True while a favorite toggle request is in flight, to drop double-clicks.
+    private var favoriteInFlight: Bool = false
     private var anticipatingTask: Task<Void, Never>?
     private var commandFeedbackTask: Task<Void, Never>?
     /// Timestamp of the last command we issued. Used to suppress poll-driven
@@ -134,10 +139,21 @@ final class PlayerStore {
         if let track {
             clearTrackTask?.cancel()
             clearTrackTask = nil
-            currentTrack = track
+            // Favorite state is NOT trusted from the poll: `/Sessions` does not
+            // reliably embed `UserData`, so a fresh snapshot for the same item
+            // would otherwise stomp a just-toggled heart back to false. Carry
+            // the known value across polls; only re-fetch it when the item
+            // actually changes (below).
+            let isNewItem = currentTrack?.itemId != track.itemId
+            if let existing = currentTrack, existing.itemId == track.itemId {
+                currentTrack = track.withFavorite(existing.isFavorite)
+            } else {
+                currentTrack = track
+            }
             // Music arrived — drop the "expecting music" hint.
             anticipating = false
             anticipatingTask?.cancel()
+            if isNewItem { refreshFavorite(for: track.itemId) }
         } else if currentTrack != nil {
             clearTrackTask?.cancel()
             clearTrackTask = Task { @MainActor [weak self] in
@@ -232,7 +248,8 @@ final class PlayerStore {
             album: item.album ?? "",
             runtime: .seconds(runtimeSeconds),
             position: .seconds(positionSeconds),
-            sessionId: session.id
+            sessionId: session.id,
+            isFavorite: item.userData?.isFavorite ?? false
         )
     }
 
@@ -319,7 +336,8 @@ final class PlayerStore {
             album: current.album,
             runtime: current.runtime,
             position: .seconds(target),
-            sessionId: current.sessionId
+            sessionId: current.sessionId,
+            isFavorite: current.isFavorite
         )
         lastCommandAt = Date()
 
@@ -334,6 +352,65 @@ final class PlayerStore {
             Self.logger.error("Seek failed: \(String(describing: error), privacy: .public)")
             showTransient(error.localizedDescription)
         }
+    }
+
+    /// Toggle the "favorite" flag on the currently playing item. Optimistic:
+    /// the heart flips immediately, then the request reconciles with the
+    /// server. On failure it reverts (only if the same track is still showing)
+    /// and surfaces a toast.
+    func toggleFavorite() async {
+        guard let client else { return }
+        guard let current = currentTrack else { return }
+        // Drop overlapping toggles so a double-click doesn't fire two opposite
+        // requests that race.
+        guard !favoriteInFlight else { return }
+        favoriteInFlight = true
+        defer { favoriteInFlight = false }
+
+        let target = !current.isFavorite
+
+        // Optimistic flip; the heart stays put because the poll no longer
+        // overwrites favorite state (see `apply`).
+        currentTrack = current.withFavorite(target)
+
+        do {
+            // Trust the server's reported value rather than re-polling
+            // `/Sessions` (which doesn't carry reliable `UserData`).
+            let result = try await client.setFavorite(itemId: current.itemId, isFavorite: target)
+            if let now = currentTrack, now.itemId == current.itemId {
+                currentTrack = now.withFavorite(result)
+            }
+            Self.logger.notice("Set favorite=\(result, privacy: .public) OK")
+        } catch let error as NetworkError {
+            revertFavorite(itemId: current.itemId, to: current.isFavorite)
+            Self.logger.error("Set favorite failed: \(String(describing: error), privacy: .public)")
+            showTransient(error.errorDescription ?? "Couldn't update favorite.")
+        } catch {
+            revertFavorite(itemId: current.itemId, to: current.isFavorite)
+            Self.logger.error("Set favorite failed: \(String(describing: error), privacy: .public)")
+            showTransient(error.localizedDescription)
+        }
+    }
+
+    /// Read the authoritative favorite state for `itemId` and apply it if that
+    /// item is still showing. Fired on track change because the poll can't be
+    /// trusted for this field.
+    private func refreshFavorite(for itemId: String) {
+        guard let client else { return }
+        favoriteRefreshTask?.cancel()
+        favoriteRefreshTask = Task { @MainActor [weak self] in
+            guard let value = try? await client.fetchFavorite(itemId: itemId) else { return }
+            guard let self, !Task.isCancelled else { return }
+            guard let current = self.currentTrack, current.itemId == itemId else { return }
+            self.currentTrack = current.withFavorite(value)
+        }
+    }
+
+    /// Restore a track's favorite flag after a failed toggle, but only if that
+    /// same item is still on screen — a track change in the meantime wins.
+    private func revertFavorite(itemId: String, to value: Bool) {
+        guard let current = currentTrack, current.itemId == itemId else { return }
+        currentTrack = current.withFavorite(value)
     }
 
     private func flashFeedback(_ action: PlaybackAction) {

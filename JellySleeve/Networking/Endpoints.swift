@@ -28,4 +28,17 @@ nonisolated enum Endpoints {
     static func sessionSeek(sessionId: String) -> String {
         "/Sessions/\(sessionId)/Playing/Seek"
     }
+
+    /// Per-user favorite flag for an item. `POST` marks it as a favorite,
+    /// `DELETE` clears it. Both return the item's `UserItemDataDto`.
+    static func userFavoriteItem(userId: String, itemId: String) -> String {
+        "/Users/\(userId)/FavoriteItems/\(itemId)"
+    }
+
+    /// A single item scoped to a user, so the response carries `UserData`
+    /// (including `IsFavorite`). Used to read the authoritative favorite state
+    /// on track change, since `/Sessions` does not reliably embed it.
+    static func userItem(userId: String, itemId: String) -> String {
+        "/Users/\(userId)/Items/\(itemId)"
+    }
 }

@@ -93,6 +93,10 @@ private struct ClassicBody: View {
                             case .next: await store.nextTrack()
                             }
                         }
+                    },
+                    isFavorite: track.isFavorite,
+                    onToggleFavorite: {
+                        Task { @MainActor in await store.toggleFavorite() }
                     }
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)

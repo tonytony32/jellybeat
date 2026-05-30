@@ -13,6 +13,9 @@ nonisolated struct NowPlayingItem: Codable, Sendable, Equatable {
     /// 100-nanosecond ticks. Divide by 10_000_000 to obtain seconds.
     let runTimeTicks: Int64?
     let imageTags: ImageTags?
+    /// Per-user metadata embedded in the item; carries the favorite flag so the
+    /// overlay can render the heart filled without a separate lookup.
+    let userData: UserData?
 
     enum CodingKeys: String, CodingKey {
         case id = "Id"
@@ -22,12 +25,21 @@ nonisolated struct NowPlayingItem: Codable, Sendable, Equatable {
         case album = "Album"
         case runTimeTicks = "RunTimeTicks"
         case imageTags = "ImageTags"
+        case userData = "UserData"
     }
 
     nonisolated struct ImageTags: Codable, Sendable, Equatable {
         let primary: String?
         enum CodingKeys: String, CodingKey {
             case primary = "Primary"
+        }
+    }
+
+    /// Subset of Jellyfin's `UserItemDataDto`. We only need the favorite flag.
+    nonisolated struct UserData: Codable, Sendable, Equatable {
+        let isFavorite: Bool?
+        enum CodingKeys: String, CodingKey {
+            case isFavorite = "IsFavorite"
         }
     }
 }
