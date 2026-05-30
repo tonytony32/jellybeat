@@ -45,14 +45,20 @@ struct OverlayView: View {
             // resolves the "click wallpaper to reveal desktop" gesture from the
             // window's actually-rendered alpha — a transparent gap counts as
             // wallpaper (a CGWindowList probe confirmed a gap pixel belonged to
-            // the Finder window beneath, not to this overlay). A ~2% black fill
-            // is visually imperceptible but gives every pixel real, opaque-
-            // enough content, so SwiftUI hit-tests it AND the WindowServer
-            // counts the window as covering the desktop. A near-miss on a
-            // control is swallowed instead of revealing the desktop. Sits at
-            // the back of the ZStack, not gated by theme/chrome opacity, so it
-            // protects every theme in every state. Verified on-screen.
-            Color.black.opacity(0.02)
+            // the Finder window beneath, not to this overlay). A tiny black
+            // fill gives every pixel real, opaque-enough content, so SwiftUI
+            // hit-tests it AND the WindowServer counts the window as covering
+            // the desktop. A near-miss on a control is swallowed instead of
+            // revealing the desktop. Sits at the back of the ZStack, not gated
+            // by theme/chrome opacity, so it protects every theme in every
+            // state.
+            //
+            // Alpha kept as low as possible: 0.02 (~5/255) read as a faint grey
+            // rectangle over the wallpaper in the frameless themes (Classic /
+            // Aero). 0.005 (~1.3/255) is imperceptible while still a *real*
+            // color. If gap clicks ever start revealing the desktop again,
+            // nudge this up slightly.
+            Color.black.opacity(0.005)
             if themes.current.behavior.hasGlassBackground {
                 GlassBackground(material: themes.current.behavior.glassMaterial)
                     .opacity(chromeOpacity)
