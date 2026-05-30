@@ -37,21 +37,6 @@ struct OverlayView: View {
             }
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            ConnectionDotView(state: player.connectionState)
-                .overlayHitTarget()
-                .padding(.top, 14)
-                .padding(.trailing, 14)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                .opacity(chromeOpacity)
-                .onTapGesture {
-                    if case .error = player.connectionState {
-                        openSettings()
-                    }
-                }
-                // The enlarged hit target must not swallow the ambient-mode
-                // "Open Jellyfin" hover/tap in the top-trailing corner while
-                // the dot itself is faded out.
-                .allowsHitTesting(chromeOpacity > 0)
             TransientToastView(message: player.transientMessage)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .padding(.bottom, 8)
