@@ -28,6 +28,26 @@ nonisolated struct TrackSnapshot: Equatable, Sendable {
     /// Owning session id; needed to target playback commands at the right
     /// client device.
     let sessionId: String
+    /// Whether the current user has marked this item as a favorite. Drives the
+    /// heart button's filled/outline state.
+    let isFavorite: Bool
+
+    /// Returns a copy with a different `isFavorite`. Used by `PlayerStore` for
+    /// the optimistic heart toggle (and its revert on failure) without rebuilding
+    /// every field by hand.
+    func withFavorite(_ value: Bool) -> TrackSnapshot {
+        TrackSnapshot(
+            itemId: itemId,
+            imageTag: imageTag,
+            title: title,
+            artist: artist,
+            album: album,
+            runtime: runtime,
+            position: position,
+            sessionId: sessionId,
+            isFavorite: value
+        )
+    }
 }
 
 /// Lightweight description of one session shown in the manual selector

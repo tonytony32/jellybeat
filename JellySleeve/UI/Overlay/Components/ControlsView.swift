@@ -18,8 +18,13 @@ struct ControlsView: View {
     /// row was hover-hidden.
     let flashedAction: Action?
     let action: @MainActor (Action) -> Void
+    /// Whether the current track is favorited; drives the heart's filled state.
+    let isFavorite: Bool
+    /// Toggles the favorite flag on the current track.
+    let onToggleFavorite: @MainActor () -> Void
 
     @State private var hoveredAction: Action?
+    @State private var favoriteHovered = false
 
     var body: some View {
         // Tight spacing because each button now claims a 44 pt hit target
@@ -33,6 +38,7 @@ struct ControlsView: View {
                 emphasised: true
             )
             controlButton(systemName: "forward.fill", action: .next)
+            favoriteButton
         }
         .padding(.horizontal, behavior.controlsHasBackground ? 12 : 0)
         .padding(.vertical, behavior.controlsHasBackground ? 6 : 0)
@@ -80,6 +86,34 @@ struct ControlsView: View {
         }
         .animation(.spring(response: 0.22, dampingFraction: 0.65), value: hoveredAction)
         .animation(.spring(response: 0.25, dampingFraction: 0.55), value: flashedAction)
+        .focusEffectDisabled()
+    }
+
+    /// Favorite toggle. Sits at the trailing edge of the transport row (after
+    /// the forward button) so it rides the same hover/capsule treatment as the
+    /// other controls. Filled when the track is a favorite, an outline
+    /// otherwise; it inherits the same colour as the transport glyphs (white on
+    /// the dark overlay) rather than tinting itself.
+    @ViewBuilder
+    private var favoriteButton: some View {
+        Button {
+            onToggleFavorite()
+        } label: {
+            Image(systemName: isFavorite ? "heart.fill" : "heart")
+                .font(.system(size: 14, weight: .semibold))
+                .frame(width: 24, height: 24)
+                .overlayHitTarget()
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(
+            isFavorite
+                ? String(localized: "Remove from favorites")
+                : String(localized: "Add to favorites")
+        )
+        .scaleEffect(favoriteHovered ? 1.12 : 1.0)
+        .onHover { favoriteHovered = $0 }
+        .animation(.spring(response: 0.22, dampingFraction: 0.65), value: favoriteHovered)
+        .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isFavorite)
         .focusEffectDisabled()
     }
 
