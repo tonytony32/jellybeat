@@ -31,6 +31,22 @@ struct OverlayView: View {
 
     var body: some View {
         ZStack {
+            // Full-window hit-catching surface. The themes that float over the
+            // desktop (Aero / Classic have no glass background) leave the gaps
+            // between cover / text / progress / controls fully transparent, and
+            // SwiftUI does not hit-test fully-transparent areas. A click in
+            // those gaps fell through to whatever sat behind the overlay — the
+            // desktop — which selected the Finder and triggered macOS's "click
+            // wallpaper to reveal desktop" gesture, sweeping every window aside.
+            //
+            // A `.clear` Color with an explicit `contentShape` makes SwiftUI
+            // own every pixel of the window, so a near-miss on a control is
+            // swallowed by the overlay instead of leaking to the desktop. It
+            // sits at the back of the ZStack (behind all real content) and is
+            // intentionally not gated by theme or `chromeOpacity`, so it
+            // protects every theme in every state.
+            Color.clear
+                .contentShape(Rectangle())
             if themes.current.behavior.hasGlassBackground {
                 GlassBackground(material: themes.current.behavior.glassMaterial)
                     .opacity(chromeOpacity)
