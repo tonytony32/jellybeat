@@ -47,7 +47,14 @@ private struct ClassicBody: View {
     let theme: ClassicTheme
 
     var body: some View {
-        HStack(spacing: 12) {
+        // `.bottom` so the cover sits flush in the lower-left corner with the
+        // same margin to the base as to the side (= `padding`). The window is
+        // taller than the 120pt cover (it must fit the 44pt control row in the
+        // info column), and a centred HStack would split that slack into an
+        // extra ~10pt above and below the cover — making the bottom gap larger
+        // than the side gap. Pinning to the bottom puts all the slack above the
+        // cover, where it's invisible (Classic floats with no glass frame).
+        HStack(alignment: .bottom, spacing: 12) {
             ArtworkView(
                 itemId: track.itemId,
                 imageTag: track.imageTag,
