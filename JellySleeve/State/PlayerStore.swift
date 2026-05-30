@@ -28,6 +28,11 @@ final class PlayerStore {
     var currentTrack: TrackSnapshot? = nil
     var isPaused: Bool = false
 
+    /// Output volume (0...100) of the active client, as last reported by the
+    /// poll or set optimistically via `nudgeVolume`. Drives the scroll-to-
+    /// change-volume interaction and its on-overlay readout.
+    var volume: Int = 100
+
     /// Manual override for the active-session heuristic (plan §4 point 2).
     /// Persisted across launches so a multi-device user keeps their pick.
     var selectedSessionId: String? {
@@ -62,6 +67,11 @@ final class PlayerStore {
     /// media key (F7/F8/F9) and the artwork/title hasn't updated yet.
     var commandFeedback: PlaybackAction? = nil
 
+    /// Set while the user is scrolling to change the volume so the overlay can
+    /// flash a transient volume readout. Carries the level (0...100) to show;
+    /// cleared ~1 s after the last scroll tick.
+    var volumeFeedback: Int? = nil
+
     // MARK: - Wired in by AppDelegate
 
     private var client: JellyfinClient?
@@ -78,6 +88,14 @@ final class PlayerStore {
     private var favoriteInFlight: Bool = false
     private var anticipatingTask: Task<Void, Never>?
     private var commandFeedbackTask: Task<Void, Never>?
+    private var volumeFeedbackTask: Task<Void, Never>?
+    /// Debounces the actual `SetVolume` request so a flurry of scroll ticks
+    /// collapses into one network call once the user pauses.
+    private var volumeSendTask: Task<Void, Never>?
+    /// Timestamp of the last local volume change, used to ignore poll-driven
+    /// volume updates briefly so an optimistic scroll doesn't snap back before
+    /// the client has acknowledged the new level.
+    private var lastVolumeCommandAt: Date?
     /// Timestamp of the last command we issued. Used to suppress poll-driven
     /// `isPaused` updates briefly so an optimistic toggle doesn't snap back
     /// before the server's round-trip with the client has completed.
@@ -90,6 +108,10 @@ final class PlayerStore {
     /// the new state back to the server in time for the next `/Sessions`
     /// reply.
     private static let optimisticPlayPauseWindow: TimeInterval = 1.5
+    /// Window during which poll-reported volume is ignored in favour of the
+    /// local optimistic value. Covers the debounce plus a round-trip margin so
+    /// the readout doesn't flicker back to a stale level mid-scroll.
+    private static let optimisticVolumeWindow: TimeInterval = 2.0
     /// How long to wait before clearing `currentTrack` when a poll reports no
     /// active track. Smooths over the brief gap between songs while the web
     /// player loads the next one.
@@ -117,6 +139,7 @@ final class PlayerStore {
         connectionState: ConnectionState,
         track: TrackSnapshot?,
         isPaused: Bool,
+        volume: Int?,
         sessions: [SessionSummary]
     ) {
         if self.connectionState != connectionState { self.connectionState = connectionState }
@@ -128,6 +151,16 @@ final class PlayerStore {
             // skip
         } else if self.isPaused != isPaused {
             self.isPaused = isPaused
+        }
+        // Same optimistic protection for volume: a just-scrolled level wins
+        // over the poll until the client has had time to acknowledge it.
+        if let volume {
+            let recentlyChanged = lastVolumeCommandAt
+                .map { Date().timeIntervalSince($0) < Self.optimisticVolumeWindow }
+                ?? false
+            if !recentlyChanged, self.volume != volume {
+                self.volume = volume
+            }
         }
         if self.availableSessions != sessions { self.availableSessions = sessions }
 
@@ -238,12 +271,14 @@ final class PlayerStore {
 
         let snapshot = pick.flatMap { Self.makeSnapshot(from: $0) }
         let pausedFromServer = pick?.playState?.isPaused ?? false
+        let volumeFromServer = pick?.playState?.volumeLevel
         let summaries = Self.summaries(of: sessions, userId: userId)
 
         apply(
             connectionState: .connected,
             track: snapshot,
             isPaused: pausedFromServer,
+            volume: volumeFromServer,
             sessions: summaries
         )
     }
@@ -366,6 +401,57 @@ final class PlayerStore {
         } catch {
             Self.logger.error("Seek failed: \(String(describing: error), privacy: .public)")
             showTransient(error.localizedDescription)
+        }
+    }
+
+    /// Adjust the active client's volume by `delta` percentage points, clamped
+    /// to 0...100. Called repeatedly while the user scrolls over the overlay.
+    ///
+    /// The local level updates immediately (and flashes a readout) so scrolling
+    /// feels instant; the actual `SetVolume` request is debounced so a burst of
+    /// scroll ticks collapses into a single network call once the user pauses.
+    func nudgeVolume(by delta: Int) {
+        guard delta != 0 else { return }
+        // Volume only means something when a client is actually playing.
+        guard let current = currentTrack else { return }
+        let newValue = min(100, max(0, volume + delta))
+        lastVolumeCommandAt = Date()
+        flashVolume(newValue)
+        // At the 0 / 100 boundary the level can't move, but we still want the
+        // readout to confirm the scroll registered — only schedule a network
+        // send when the value genuinely changed.
+        guard newValue != volume else { return }
+        volume = newValue
+        scheduleVolumeSend(to: newValue, sessionId: current.sessionId)
+    }
+
+    /// Debounced `SetVolume` dispatch. Cancels any pending send and fires the
+    /// latest target ~250 ms after the last scroll tick.
+    private func scheduleVolumeSend(to value: Int, sessionId: String) {
+        volumeSendTask?.cancel()
+        volumeSendTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled, let self, let client = self.client else { return }
+            do {
+                try await client.setVolume(sessionId: sessionId, volume: value)
+                Self.logger.notice("SetVolume \(value, privacy: .public) OK")
+            } catch let error as NetworkError {
+                Self.logger.error("SetVolume failed: \(String(describing: error), privacy: .public)")
+                self.showTransient(error.errorDescription ?? "Couldn't change volume.")
+            } catch {
+                Self.logger.error("SetVolume failed: \(String(describing: error), privacy: .public)")
+                self.showTransient(error.localizedDescription)
+            }
+        }
+    }
+
+    private func flashVolume(_ value: Int) {
+        volumeFeedback = value
+        volumeFeedbackTask?.cancel()
+        volumeFeedbackTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard !Task.isCancelled else { return }
+            self?.volumeFeedback = nil
         }
     }
 

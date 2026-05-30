@@ -151,6 +151,25 @@ nonisolated struct JellyfinClient: Sendable {
         try validate(response)
     }
 
+    /// Set the active client's output volume to `volume` (0...100). Sent as a
+    /// `SetVolume` general command, whose single argument Jellyfin expects as a
+    /// string. Used by the overlay's scroll-to-change-volume interaction.
+    func setVolume(sessionId: String, volume: Int) async throws {
+        let clamped = min(100, max(0, volume))
+        var request = try makeRequest(
+            path: Endpoints.sessionCommand(sessionId: sessionId),
+            method: "POST"
+        )
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body = GeneralCommandBody(
+            name: "SetVolume",
+            arguments: ["Volume": "\(clamped)"]
+        )
+        request.httpBody = try JSONEncoder().encode(body)
+        let (_, response) = try await send(request, on: controlSession)
+        try validate(response)
+    }
+
     /// Mark or clear the favorite flag for `itemId` on the configured user.
     /// Jellyfin uses `POST` to favorite and `DELETE` to un-favorite the item.
     /// Both return a `UserItemDataDto`; we decode the resulting `IsFavorite` so
@@ -184,6 +203,17 @@ nonisolated struct JellyfinClient: Sendable {
     }
 
     // MARK: - Internals
+
+    /// Body for a Jellyfin `GeneralCommand` (`POST /Sessions/{id}/Command`).
+    /// `Arguments` values are always strings on the wire, even for numbers.
+    private struct GeneralCommandBody: Encodable {
+        let name: String
+        let arguments: [String: String]
+        enum CodingKeys: String, CodingKey {
+            case name = "Name"
+            case arguments = "Arguments"
+        }
+    }
 
     /// Minimal decode target for `userItem`: we only care about `UserData`.
     private struct ItemUserDataEnvelope: Decodable, Sendable {
