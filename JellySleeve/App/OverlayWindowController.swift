@@ -46,6 +46,11 @@ final class OverlayWindowController: NSObject {
     /// the per-poll `currentTrack` churn doesn't re-run the geometry pass when
     /// only the playback position changed.
     private var lastAppliedAmbient: Bool?
+    /// The play-queue side panel (a borderless child window beside the overlay)
+    /// and its click-outside dismissal monitors. Shown while
+    /// `player.isQueuePopoverOpen` is true.
+    private var queuePanel: NSPanel?
+    private var queueDismissMonitors: [Any] = []
 
     init(
         settings: SettingsStore,
@@ -69,6 +74,7 @@ final class OverlayWindowController: NSObject {
         watchThemeForWindowResize()
         watchAppearanceSettings()
         watchPlayerForAmbientMode()
+        watchQueuePanel()
     }
 
     func shutdown() {
@@ -76,6 +82,7 @@ final class OverlayWindowController: NSObject {
             NotificationCenter.default.removeObserver(observer)
         }
         windowVisibilityObservers.removeAll()
+        dismissQueuePanel()
     }
 
     // MARK: - Public entry points
@@ -503,7 +510,8 @@ extension OverlayWindowController: NSWindowDelegate {
         guard NSEvent.pressedMouseButtons & 0x1 != 0 else { return }
         // A user drag is in progress. Block poll-driven repositioning, and
         // debounce the snap so it runs once movement stops (i.e. on release),
-        // never mid-drag.
+        // never mid-drag. Close the queue panel so it doesn't trail the drag.
+        player.isQueuePopoverOpen = false
         isUserDragging = true
         dragSettleTask?.cancel()
         dragSettleTask = Task { @MainActor [weak self] in
@@ -524,6 +532,154 @@ extension OverlayWindowController: NSWindowDelegate {
             settings.setOverlayPosition(window.frame.origin, forDisplay: displayID)
         }
     }
+}
+
+// MARK: - Queue side panel
+
+extension OverlayWindowController {
+    /// Bind the queue side panel to `player.isQueuePopoverOpen`. Presenting the
+    /// queue as our own borderless child window — rather than a SwiftUI
+    /// `.popover` — lets us place it beside the overlay so it never covers the
+    /// now-playing frame and, crucially, never nudges the overlay off its spot
+    /// (the popover did, to fit itself above the Dock).
+    private func watchQueuePanel() {
+        withObservationTracking {
+            _ = player.isQueuePopoverOpen
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.syncQueuePanel()
+                self?.watchQueuePanel()
+            }
+        }
+    }
+
+    private func syncQueuePanel() {
+        if player.isQueuePopoverOpen {
+            presentQueuePanel()
+        } else {
+            dismissQueuePanel()
+        }
+    }
+
+    private func presentQueuePanel() {
+        guard let overlay = overlayWindow else { return }
+
+        let panel: NSPanel
+        if let existing = queuePanel {
+            panel = existing
+        } else {
+            panel = QueuePanelWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 300, height: 380),
+                styleMask: [.borderless, .nonactivatingPanel],
+                backing: .buffered,
+                defer: false
+            )
+            panel.isFloatingPanel = true
+            panel.hidesOnDeactivate = false
+            panel.backgroundColor = .clear
+            panel.isOpaque = false
+            panel.hasShadow = true
+            panel.isReleasedWhenClosed = false
+            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            panel.appearance = NSAppearance(named: .darkAqua)
+            panel.contentView = NSHostingView(
+                rootView: QueuePanelView()
+                    .environment(player)
+                    .environment(artworkProvider)
+            )
+            queuePanel = panel
+        }
+
+        // Match the overlay's window level so it floats with it, and size to the
+        // current content (short queue → short panel) up to the 380 pt cap.
+        panel.level = overlay.level
+        if let hosting = panel.contentView {
+            hosting.layoutSubtreeIfNeeded()
+            let fit = hosting.fittingSize
+            let height = fit.height > 1 ? min(fit.height, 380) : 380
+            panel.setContentSize(NSSize(width: 300, height: height))
+        }
+        positionQueuePanel(panel, relativeTo: overlay)
+        if panel.parent == nil {
+            overlay.addChildWindow(panel, ordered: .above)
+        }
+        panel.makeKeyAndOrderFront(nil)
+        installQueueDismissMonitors()
+    }
+
+    /// Place the panel just to the right of the overlay (flipping to the left if
+    /// there's no room), bottom-aligned with it, then clamp fully inside the
+    /// visible frame so it's never under the Dock or menu bar. Only the panel
+    /// moves — the overlay is never touched.
+    private func positionQueuePanel(_ panel: NSPanel, relativeTo overlay: NSWindow) {
+        guard let screen = overlay.screen ?? NSScreen.main else { return }
+        // Clamp to the physical screen (minus the menu bar), NOT the visible
+        // frame — i.e. ignore the Dock, exactly like the overlay does. Clamping
+        // to `visibleFrame` is what pushed the panel up by the Dock's height
+        // when it was shown, so it behaved differently than with the Dock
+        // hidden.
+        let area = snapFrame(for: screen)
+        let size = panel.frame.size
+        let gap: CGFloat = 8
+        let o = overlay.frame
+
+        var x = o.maxX + gap
+        if x + size.width > area.maxX {
+            x = o.minX - gap - size.width
+        }
+        x = min(max(area.minX, x), area.maxX - size.width)
+
+        // Bottom-align with the overlay so the panel stays anchored to it (it
+        // may sit over the Dock, just as the overlay can); only the menu bar at
+        // the top is kept clear.
+        var y = o.minY
+        y = min(max(area.minY, y), area.maxY - size.height)
+
+        panel.setFrameOrigin(NSPoint(x: x, y: y))
+    }
+
+    private func dismissQueuePanel() {
+        removeQueueDismissMonitors()
+        guard let panel = queuePanel else { return }
+        panel.parent?.removeChildWindow(panel)
+        panel.orderOut(nil)
+    }
+
+    private func installQueueDismissMonitors() {
+        removeQueueDismissMonitors()
+        let local = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+            Task { @MainActor [weak self] in self?.dismissQueueIfClickOutside() }
+            return event
+        }
+        let global = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.player.isQueuePopoverOpen = false }
+        }
+        queueDismissMonitors = [local, global].compactMap { $0 }
+    }
+
+    private func removeQueueDismissMonitors() {
+        for monitor in queueDismissMonitors {
+            NSEvent.removeMonitor(monitor)
+        }
+        queueDismissMonitors.removeAll()
+    }
+
+    /// Close the panel on a click that's neither inside it nor on the overlay.
+    /// Clicks on the overlay are spared so the list button can toggle the panel
+    /// (and dragging the overlay is handled separately).
+    private func dismissQueueIfClickOutside() {
+        guard let panel = queuePanel, let overlay = overlayWindow else { return }
+        let point = NSEvent.mouseLocation
+        if panel.frame.contains(point) || overlay.frame.contains(point) { return }
+        player.isQueuePopoverOpen = false
+    }
+}
+
+/// Nonactivating borderless panel for the queue list. Overrides `canBecomeKey`
+/// so the SwiftUI row buttons receive clicks, while staying nonactivating so
+/// showing it never activates the app or disturbs the overlay's position.
+final class QueuePanelWindow: NSPanel {
+    override var canBecomeKey: Bool { true }
 }
 
 // MARK: - Borderless window + hosting view
