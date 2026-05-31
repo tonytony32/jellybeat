@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JellySleeve · Git graph & rebase</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --border:#30363d; --txt:#e6edf3; --muted:#8b949e;
+    --main:#58a6ff; --feat:#3fb950; --vol:#d29922; --queue:#bc8cff; --red:#f85149;
+    --mono:'SF Mono',ui-monospace,'Cascadia Code',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font:15px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:36px 18px}
+  .wrap{max-width:1040px;margin:0 auto}
+  h1{font-size:27px;margin:0 0 4px}
+  h2{font-size:20px;margin:46px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+  .sub{color:var(--muted);margin:0 0 8px}
+  code{font-family:var(--mono);background:#1f2630;padding:2px 6px;border-radius:5px;font-size:.86em}
+  pre{font-family:var(--mono);background:#010409;border:1px solid var(--border);
+    border-radius:8px;padding:14px 16px;overflow-x:auto;font-size:13px;line-height:1.55}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:18px 22px;margin:16px 0}
+  .legend{display:flex;gap:20px;flex-wrap:wrap;margin:14px 0;font-size:13.5px}
+  .legend span{display:flex;align-items:center;gap:7px}
+  .sw{width:14px;height:14px;border-radius:50%}
+  .scroll{overflow-x:auto}
+  svg{display:block;margin:0 auto}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:780px){.cols{grid-template-columns:1fr}}
+  ul{margin:8px 0;padding-left:22px} li{margin:5px 0}
+  .good{color:var(--feat)} .warn{color:var(--vol)} .bad{color:var(--red)}
+  .pill{font-size:11px;border:1px solid var(--border);border-radius:20px;padding:2px 9px;color:var(--muted)}
+  .lbl{color:var(--main);font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🪼 JellySleeve — git graph de la sesión</h1>
+  <p class="sub">Topología real del repo. El tiempo avanza de izquierda → derecha. Cada círculo es un commit; los grandes con anillo son <b>merge commits</b>.</p>
+
+  <div class="legend">
+    <span><span class="sw" style="background:var(--main)"></span> <b style="color:var(--main)">main</b></span>
+    <span><span class="sw" style="background:var(--vol)"></span> <b style="color:var(--vol)">PR #4 · scroll volumen</b></span>
+    <span><span class="sw" style="background:var(--feat)"></span> <b style="color:var(--feat)">PR #2 · desconexión</b></span>
+    <span><span class="sw" style="background:var(--queue)"></span> <b style="color:var(--queue)">PR #3 · queue popover</b></span>
+  </div>
+
+  <div class="card scroll">
+    <svg id="graph" width="960" height="470" viewBox="0 0 960 470"></svg>
+  </div>
+
+  <div class="card" style="border-color:var(--vol)">
+    <b>📖 Lo que cuenta el diagrama:</b> de un ancestro común (<code>93b31ae</code>) salieron 3 ramas.
+    <b style="color:var(--vol)">#4</b> y <b style="color:var(--feat)">#2</b> volvieron a <code>main</code> sin problema.
+    Pero <b style="color:var(--queue)">#3 (queue popover)</b> nació de una <code>main</code> vieja y tocaba los mismos archivos,
+    así que primero hubo que <b>traer <code>main</code> a su rama</b> (<code>ece0718</code>, ahí resolví los conflictos)
+    y luego ya se integró (<code>44c7520</code>). Fíjate cómo la línea morada baja, se cruza con la azul y vuelve a subir: <b>eso</b> es el conflicto hecho dibujo.
+  </div>
+
+  <h2>↔️ ¿Y rebase qué es? El mismo tramo, dibujado</h2>
+  <p>Lo que hice fue <b class="warn">MERGE</b> (la curva morada que baja a por <code>main</code> y vuelve). Con <b class="good">REBASE</b>, esa rama se habría <i>despegado</i> y vuelto a pegar al final de <code>main</code>, recta:</p>
+
+  <div class="cols">
+    <div class="card">
+      <p><b class="warn">MERGE</b> <span class="pill">lo que hice</span></p>
+      <div class="scroll"><svg id="merge" width="440" height="170" viewBox="0 0 440 170"></svg></div>
+      <ul>
+        <li class="good">✓ Nunca reescribe historia → seguro siempre</li>
+        <li class="warn">✗ Crea un commit "Merge…" y curva el grafo</li>
+      </ul>
+    </div>
+    <div class="card">
+      <p><b class="good">REBASE</b></p>
+      <div class="scroll"><svg id="rebase" width="440" height="170" viewBox="0 0 440 170"></svg></div>
+      <ul>
+        <li class="good">✓ Historia lineal y limpia, sin merge commit</li>
+        <li class="bad">✗ Reescribe tus commits (hash nuevo: X→X′)</li>
+        <li class="bad">✗ Solo en ramas privadas que nadie más tenga</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card">
+    <p><b>Regla de oro 🥇</b></p>
+    <ul>
+      <li><b class="good">Rebase</b> tu rama local contra <code>main</code> <u>antes</u> de subir la PR → línea recta.</li>
+      <li><b class="warn">Merge</b> (o squash) la PR <u>dentro</u> de <code>main</code> → queda el punto de integración.</li>
+      <li><b class="bad">Nunca</b> rebasees una rama que otra persona ya descargó.</li>
+    </ul>
+  </div>
+
+  <h2>📄 ¿Por qué chocó #3? La analogía del documento compartido</h2>
+  <p class="sub">Sin tecnicismos: <code>main</code> = un documento compartido. Cada PR = una copia que alguien se lleva para editar.</p>
+
+  <div class="card">
+    <div class="scroll"><svg id="doc" width="920" height="320" viewBox="0 0 920 320"></svg></div>
+  </div>
+
+  <div class="cols">
+    <div class="card" style="border-color:var(--red)">
+      <p><b class="bad">❌ Lo que pasó</b></p>
+      <ol style="padding-left:20px;margin:6px 0">
+        <li>#2, #3 y #4 sacan copia <b>el mismo día</b>, de la misma versión.</li>
+        <li>Las tres editan <b>el mismo párrafo</b> (el archivo <code>PlayerStore</code>).</li>
+        <li>#4 y #2 pegan sus cambios en el original. Entran bien.</li>
+        <li>#3 sigue basada en la versión <b>vieja</b>… pero ese párrafo ya cambió 2 veces.</li>
+        <li>git no sabe qué versión vale → <b>"resuélvelo tú"</b>. 💥</li>
+      </ol>
+    </div>
+    <div class="card" style="border-color:var(--feat)">
+      <p><b class="good">✅ Lo que se debió hacer</b></p>
+      <p style="margin:6px 0"><b>Refrescar la copia cada vez que el original cambia</b>, no esperar al final.</p>
+      <ul>
+        <li>Cuando entró #4 → traer ese cambio a la copia de #3.</li>
+        <li>Cuando entró #2 → traerlo también.</li>
+      </ul>
+      <p style="margin:6px 0">Así reconcilias <b>un cambio pequeño cada vez</b> (fácil) en vez de <b>tres de golpe al final</b> (lío). Y lo hace quien escribió el código, con contexto fresco.</p>
+    </div>
+  </div>
+
+  <div class="card" style="background:#13231a;border-color:var(--feat)">
+    <b>🎯 La frase para quedarte:</b> el problema no fue <i>qué</i> hacía la PR #3,
+    sino que <b>se quedó vieja</b>. Si hubiera ido sincronizando con <code>main</code> sobre la marcha,
+    el conflicto habría sido un retoque de 10 segundos en lugar de reconciliar tres ramas.
+    <br><span class="sub" style="margin-top:6px;display:inline-block">(«Rebase» es solo el botón técnico para ese «refrescar la copia».)</span>
+  </div>
+
+  <h2>🆚 Tabla rápida</h2>
+  <div class="card"><pre>                MERGE                    REBASE
+historia        grafo con ramas          línea recta
+commits         intactos + "Merge…"      reescritos (hash nuevo)
+seguridad       siempre seguro           solo ramas privadas
+mejor para      integrar PR → main       poner al día tu rama</pre></div>
+
+  <p class="sub" style="text-align:center;margin-top:28px">Generado desde el grafo real del repo</p>
+</div>
+
+<script>
+const C = {main:'#58a6ff', vol:'#d29922', feat:'#3fb950', queue:'#bc8cff'};
+
+// ---- helper: curved/straight edge between two points ----
+function edge(svg, x1,y1, x2,y2, color, dash){
+  const p = document.createElementNS('http://www.w3.org/2000/svg','path');
+  let d;
+  if (y1===y2){ d = `M ${x1} ${y1} L ${x2} ${y2}`; }
+  else { const mx=(x1+x2)/2; d = `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`; }
+  p.setAttribute('d',d); p.setAttribute('fill','none');
+  p.setAttribute('stroke',color); p.setAttribute('stroke-width','3.5');
+  if(dash) p.setAttribute('stroke-dasharray','6 5');
+  svg.appendChild(p); return p;
+}
+function node(svg, x,y, color, merge, hash, label, lblpos){
+  const g=document.createElementNS('http://www.w3.org/2000/svg','g');
+  if(merge){
+    const ring=document.createElementNS('http://www.w3.org/2000/svg','circle');
+    ring.setAttribute('cx',x);ring.setAttribute('cy',y);ring.setAttribute('r',13);
+    ring.setAttribute('fill','none');ring.setAttribute('stroke',color);ring.setAttribute('stroke-width','3');
+    g.appendChild(ring);
+  }
+  const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
+  c.setAttribute('cx',x);c.setAttribute('cy',y);c.setAttribute('r',merge?7:8);
+  c.setAttribute('fill',color);c.setAttribute('stroke','#0d1117');c.setAttribute('stroke-width','3');
+  g.appendChild(c);
+  if(hash){
+    const t=document.createElementNS('http://www.w3.org/2000/svg','text');
+    t.setAttribute('x',x);t.setAttribute('y',y+ (lblpos==='top'?-22:32));
+    t.setAttribute('text-anchor','middle');t.setAttribute('fill','#8b949e');
+    t.setAttribute('font-family',"'SF Mono',monospace");t.setAttribute('font-size','11');
+    t.textContent=hash; g.appendChild(t);
+    if(label){
+      const t2=document.createElementNS('http://www.w3.org/2000/svg','text');
+      t2.setAttribute('x',x);t2.setAttribute('y',y+(lblpos==='top'?-37:47));
+      t2.setAttribute('text-anchor','middle');t2.setAttribute('fill',color);
+      t2.setAttribute('font-family',"-apple-system,sans-serif");t2.setAttribute('font-size','11.5');
+      t2.setAttribute('font-weight','600');t2.textContent=label; g.appendChild(t2);
+    }
+  }
+  svg.appendChild(g); return g;
+}
+function laneLabel(svg,x,y,text,color){
+  const t=document.createElementNS('http://www.w3.org/2000/svg','text');
+  t.setAttribute('x',x);t.setAttribute('y',y+4);t.setAttribute('text-anchor','end');
+  t.setAttribute('fill',color);t.setAttribute('font-family',"'SF Mono',monospace");
+  t.setAttribute('font-size','12');t.setAttribute('font-weight','600');
+  t.textContent=text; svg.appendChild(t);
+}
+
+// ================= MAIN GRAPH =================
+(function(){
+  const s=document.getElementById('graph');
+  // lanes (y)
+  const Q=70, V=170, M=275, F=390;
+  // nodes (x)
+  const n={
+    base:[110,M], vol:[250,V], queue:[300,Q], dis:[300,F],
+    m4:[400,M], m2:[540,M], qmerge:[660,Q], m3:[820,M]
+  };
+  // lane labels
+  laneLabel(s,95,Q,'queue-popover',C.queue);
+  laneLabel(s,95,V,'#4 volumen',C.vol);
+  laneLabel(s,95,M,'main',C.main);
+  laneLabel(s,95,F,'#2 desconexión',C.feat);
+
+  // edges (parent -> child)
+  edge(s,...n.base,...n.vol,C.vol);        // branch off vol
+  edge(s,...n.base,...n.queue,C.queue);    // branch off queue
+  edge(s,...n.base,...n.dis,C.feat);       // branch off dis
+  edge(s,...n.base,...n.m4,C.main);        // main continues
+  edge(s,...n.vol,...n.m4,C.vol);          // merge #4
+  edge(s,...n.m4,...n.m2,C.main);          // main
+  edge(s,...n.dis,...n.m2,C.feat);         // merge #2
+  edge(s,...n.queue,...n.qmerge,C.queue);  // queue continues
+  edge(s,...n.m2,...n.qmerge,C.main,true); // bring main INTO queue (dashed = el merge de conflictos)
+  edge(s,...n.m2,...n.m3,C.main);          // main
+  edge(s,...n.qmerge,...n.m3,C.queue);     // merge #3
+
+  // nodes
+  node(s,...n.base,C.main,false,'93b31ae','ancestro común','bottom');
+  node(s,...n.vol,C.vol,false,'054a3f5','',null);
+  node(s,...n.queue,C.queue,false,'6344d89','base vieja','top');
+  node(s,...n.dis,C.feat,false,'63f2ce1','',null);
+  node(s,...n.m4,C.main,true,'137accb','Merge #4','bottom');
+  node(s,...n.m2,C.main,true,'2f715e8','Merge #2','bottom');
+  node(s,...n.qmerge,C.queue,true,'ece0718','⚠ resolví conflictos','top');
+  node(s,...n.m3,C.main,true,'44c7520','Merge #3 · HEAD','bottom');
+})();
+
+// ================= MERGE mini =================
+(function(){
+  const s=document.getElementById('merge');
+  const M=60, B=120;
+  const a=[40,M],b=[150,M],c=[260,M],x=[150,B],y=[260,B],mc=[370,M];
+  edge(s,...a,...b,C.main); edge(s,...b,...c,C.main);
+  edge(s,...a,...x,C.queue); edge(s,...x,...y,C.queue);
+  edge(s,...c,...mc,C.main); edge(s,...y,...mc,C.queue);
+  node(s,...a,C.main); node(s,...b,C.main); node(s,...c,C.main);
+  node(s,...x,C.queue); node(s,...y,C.queue);
+  node(s,...mc,C.main,true,'M','merge commit','bottom');
+})();
+
+// ================= REBASE mini =================
+(function(){
+  const s=document.getElementById('rebase');
+  const M=85;
+  const a=[40,M],b=[140,M],c=[240,M],x=[330,M],y=[420,M];
+  edge(s,...a,...b,C.main); edge(s,...b,...c,C.main);
+  edge(s,...c,...x,C.queue); edge(s,...x,...y,C.queue);
+  node(s,...a,C.main); node(s,...b,C.main); node(s,...c,C.main,false,'C','main','top');
+  node(s,...x,C.queue,false,"X′",'',null); node(s,...y,C.queue,false,"Y′",'recolocados','bottom');
+})();
+
+// ================= DOC analogy =================
+(function(){
+  const s=document.getElementById('doc');
+  function txt(x,y,str,color,size,anchor,weight){
+    const t=document.createElementNS('http://www.w3.org/2000/svg','text');
+    t.setAttribute('x',x);t.setAttribute('y',y);t.setAttribute('fill',color||'#e6edf3');
+    t.setAttribute('font-size',size||13);t.setAttribute('text-anchor',anchor||'start');
+    t.setAttribute('font-family','-apple-system,sans-serif');
+    if(weight)t.setAttribute('font-weight',weight);t.textContent=str;s.appendChild(t);return t;
+  }
+  function box(x,y,w,h,color,fill){
+    const r=document.createElementNS('http://www.w3.org/2000/svg','rect');
+    r.setAttribute('x',x);r.setAttribute('y',y);r.setAttribute('width',w);r.setAttribute('height',h);
+    r.setAttribute('rx',9);r.setAttribute('fill',fill||'none');r.setAttribute('stroke',color);
+    r.setAttribute('stroke-width','2.5');s.appendChild(r);
+  }
+  // main timeline
+  const my=70;
+  edge(s,60,my,860,my,C.main);
+  [['v0',120],['+#4',360],['+#2',560],['+#3',800]].forEach(([lbl,x],i)=>{
+    node(s,x,my,C.main,i>0);
+    txt(x,my-22,lbl,C.main,12,'middle','600');
+  });
+  txt(60,my-44,'📄 main (el documento original)',C.main,14,'start','700');
+
+  // BAD copy: stays old
+  const by=170;
+  box(95,by-26,150,52,C.red,'#1a1012');
+  txt(170,by+5,'copia #3 (vieja)',C.red,12.5,'middle','600');
+  // dotted link from old version point to the copy
+  edge(s,120,my+6,170,by-26,C.red,true);
+  // tries to merge at the end -> clash
+  edge(s,245,by,800,by,C.red,true);
+  txt(620,by-12,'sigue basada en v0 mientras main cambió 2 veces…',C.red,12,'middle');
+  node(s,800,by,C.red,true);
+  txt(800,by+26,'💥 conflicto',C.red,13,'middle','700');
+
+  // GOOD copy: refreshed along the way
+  const gy=265;
+  box(95,gy-26,150,52,C.feat,'#101a12');
+  txt(170,gy+5,'copia #3 (al día)',C.feat,12.5,'middle','600');
+  edge(s,120,my+6,170,gy-26,C.feat);
+  // pull arrows down from each main change
+  edge(s,360,my+6,360,gy-26,C.feat,true);
+  edge(s,560,my+6,560,gy-26,C.feat,true);
+  edge(s,170,gy,800,gy,C.feat);
+  [360,560].forEach(x=>node(s,x,gy,C.feat));
+  node(s,800,gy,C.feat,true);
+  txt(470,gy-12,'refresca cada vez que main cambia ↑',C.feat,12,'middle');
+  txt(800,gy+26,'✓ entra limpia',C.feat,13,'middle','700');
+})();
+</script>
+</body>
+</html>

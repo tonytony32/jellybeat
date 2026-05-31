@@ -36,7 +36,7 @@ struct QueuePopover: View {
         // (the arrow); `colorScheme(.dark)` keeps text/badges light over it.
         .background(GlassBackground())
         .colorScheme(.dark)
-        .background(PopoverDarkAppearance())
+        .background(PopoverChromeStyler())
     }
 
     private var emptyState: some View {
@@ -81,23 +81,44 @@ struct QueuePopover: View {
     }
 }
 
-/// Reaches the popover's backing `_NSPopoverWindow` and pins its appearance to
-/// dark, so the popover's own chrome (rounded frame, arrow, vibrant material)
-/// matches the dark overlay regardless of the system's Light/Dark setting.
-/// `colorScheme(.dark)` alone only affects SwiftUI content, not that chrome.
+/// Reaches into the popover's backing `_NSPopoverWindow` and restyles its
+/// *own* chrome so there's no contrasting rim around the content.
 ///
-/// The appearance must be set when the view actually enters its window —
-/// doing it in `updateNSView` is unreliable because that first runs while the
-/// view's `window` is still nil and SwiftUI may not call it again. A custom
-/// `NSView` overriding `viewDidMoveToWindow` fires at exactly the right moment.
-private struct PopoverDarkAppearance: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView { AppearancePinningView() }
+/// The system popover paints its frame, arrow and a pale rounded border with a
+/// vibrant material that follows the system appearance — on a Light-mode Mac
+/// that border reads as a bright outline around our dark content. Two steps fix
+/// it: pin the window to `darkAqua`, then walk the window's view tree and switch
+/// every `NSVisualEffectView` (the popover's background + border + arrow) to the
+/// same dark `.hudWindow` glass the content uses. Chrome and content then share
+/// one material, so the border effectively disappears (or is just a faint dark
+/// edge), with no double-layer rim.
+///
+/// This runs from `viewDidMoveToWindow` — the moment the view is actually
+/// attached to the popover window. Doing it in `updateNSView` is unreliable
+/// because that first fires while `window` is still nil.
+private struct PopoverChromeStyler: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { StylerView() }
     func updateNSView(_ nsView: NSView, context: Context) {}
 
-    final class AppearancePinningView: NSView {
+    final class StylerView: NSView {
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            window?.appearance = NSAppearance(named: .darkAqua)
+            guard let window else { return }
+            window.appearance = NSAppearance(named: .darkAqua)
+            // Start from the frame view (superview of contentView) so the
+            // border/arrow effect views are included, not just the content's.
+            let root = window.contentView?.superview ?? window.contentView
+            root.map(Self.darken)
+        }
+
+        private static func darken(_ view: NSView) {
+            if let fx = view as? NSVisualEffectView {
+                fx.material = .hudWindow
+                fx.blendingMode = .behindWindow
+                fx.state = .active
+                fx.appearance = NSAppearance(named: .darkAqua)
+            }
+            for sub in view.subviews { darken(sub) }
         }
     }
 }
