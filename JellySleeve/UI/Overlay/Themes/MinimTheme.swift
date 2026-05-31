@@ -80,7 +80,10 @@ private struct MinimBody: View {
                 onToggleFavorite: {
                     Task { @MainActor in await store.toggleFavorite() }
                 },
-                queue: store.queue
+                queue: store.queue,
+                onSelectQueueItem: { item in
+                    Task { @MainActor in await store.playQueueItem(item) }
+                }
             )
         }
         .padding(theme.layout.padding)

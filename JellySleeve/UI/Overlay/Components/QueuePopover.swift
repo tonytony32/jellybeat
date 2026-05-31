@@ -2,12 +2,13 @@ import AppKit
 import SwiftUI
 
 /// Popover listing the active client's play queue (`NowPlayingQueueFullItems`
-/// from `/Sessions`). Read-only: Jellyfin exposes the queue but no "jump to
-/// this entry" session command, so this is a preview of what's playing and
-/// what's up next, with the current track highlighted. Reachable from the
-/// list button in `ControlsView`.
+/// from `/Sessions`), with the current track highlighted. Tapping a row jumps
+/// the client to that track (`onSelect`). Reachable from the list button in
+/// `ControlsView`.
 struct QueuePopover: View {
     let queue: [QueueItem]
+    /// Invoked with the tapped queue entry so the client jumps to it.
+    let onSelect: (QueueItem) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -62,7 +63,7 @@ struct QueuePopover: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(queue) { item in
-                        QueueRow(item: item)
+                        QueueRow(item: item) { onSelect(item) }
                             .id(item.id)
                         if item.id != queue.last?.id {
                             Divider().padding(.leading, 58)
@@ -103,37 +104,68 @@ private struct PopoverDarkAppearance: NSViewRepresentable {
 }
 
 /// One queue entry: thumbnail + title/artist, with the now-playing row tinted
-/// and badged.
+/// and badged. Tapping a non-current row jumps the client to that track; the
+/// row highlights on hover (with a play glyph) to read as actionable.
 private struct QueueRow: View {
     let item: QueueItem
+    let onSelect: () -> Void
+
+    @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 10) {
-            QueueThumbnail(itemId: item.itemId, imageTag: item.imageTag)
-                .frame(width: 36, height: 36)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(item.title)
-                    .font(.callout)
-                    .fontWeight(item.isCurrent ? .semibold : .regular)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Text(item.artist)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+        Button(action: onSelect) {
+            HStack(spacing: 10) {
+                QueueThumbnail(itemId: item.itemId, imageTag: item.imageTag)
+                    .frame(width: 36, height: 36)
+                    .overlay {
+                        // On hover over an upcoming row, hint that tapping plays
+                        // it by darkening the thumbnail under a play glyph.
+                        if isHovered && !item.isCurrent {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                    .fill(.black.opacity(0.45))
+                                Image(systemName: "play.fill")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundStyle(.white)
+                            }
+                        }
+                    }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(item.title)
+                        .font(.callout)
+                        .fontWeight(item.isCurrent ? .semibold : .regular)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Text(item.artist)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                Spacer(minLength: 0)
+                if item.isCurrent {
+                    Image(systemName: "speaker.wave.2.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tint)
+                }
             }
-            Spacer(minLength: 0)
-            if item.isCurrent {
-                Image(systemName: "speaker.wave.2.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tint)
-            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .background(rowBackground)
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 6)
-        .background(item.isCurrent ? Color.primary.opacity(0.06) : Color.clear)
-        .contentShape(Rectangle())
+        .buttonStyle(.plain)
+        // Drop the blue keyboard-focus ring macOS puts on the focused button
+        // (matches the transport controls, which do the same).
+        .focusEffectDisabled()
+        // The current track is already playing — nothing to jump to.
+        .disabled(item.isCurrent)
+        .onHover { isHovered = $0 }
+    }
+
+    private var rowBackground: Color {
+        if item.isCurrent { return Color.primary.opacity(0.06) }
+        return isHovered ? Color.primary.opacity(0.10) : Color.clear
     }
 }
 

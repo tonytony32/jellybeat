@@ -151,6 +151,30 @@ nonisolated struct JellyfinClient: Sendable {
         try validate(response)
     }
 
+    /// Tell the active client to play `itemIds`, starting at `startIndex`
+    /// (`PlayNow`). Used by the queue popover to jump to a tapped track: we
+    /// resend the whole queue so its order is preserved and the client resumes
+    /// from the chosen index, rather than just playing one item in isolation.
+    func play(sessionId: String, itemIds: [String], startIndex: Int) async throws {
+        var components = URLComponents()
+        components.path = Endpoints.sessionPlaying(sessionId: sessionId)
+        components.queryItems = [
+            URLQueryItem(name: "playCommand", value: "PlayNow"),
+            URLQueryItem(name: "itemIds", value: itemIds.joined(separator: ",")),
+            URLQueryItem(name: "startIndex", value: "\(startIndex)")
+        ]
+        guard let relative = components.url,
+              let absolute = URL(string: relative.relativeString, relativeTo: configuration.baseURL)?.absoluteURL
+        else {
+            throw NetworkError.invalidURL
+        }
+        var request = URLRequest(url: absolute)
+        request.httpMethod = "POST"
+        request.setValue(configuration.apiKey, forHTTPHeaderField: "X-Emby-Token")
+        let (_, response) = try await send(request, on: controlSession)
+        try validate(response)
+    }
+
     /// Set the active client's output volume to `volume` (0...100). Sent as a
     /// `SetVolume` general command, whose single argument Jellyfin expects as a
     /// string. Used by the overlay's scroll-to-change-volume interaction.

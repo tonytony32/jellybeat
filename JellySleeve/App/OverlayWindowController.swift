@@ -495,6 +495,12 @@ extension OverlayWindowController: NSWindowDelegate {
         guard !suppressMoveCallback,
               let window = notification.object as? NSWindow,
               window == overlayWindow else { return }
+        // Only react to genuine user drags (primary mouse button held). AppKit
+        // also fires windowDidMove for moves *it* makes — notably nudging the
+        // window up so a popover (the queue list) fits on screen above the
+        // Dock. Treating those as a drag would snap + persist a position the
+        // user never chose, so the window would creep up when opening the list.
+        guard NSEvent.pressedMouseButtons & 0x1 != 0 else { return }
         // A user drag is in progress. Block poll-driven repositioning, and
         // debounce the snap so it runs once movement stops (i.e. on release),
         // never mid-drag.

@@ -29,6 +29,14 @@ nonisolated enum Endpoints {
         "/Sessions/\(sessionId)/Playing/Seek"
     }
 
+    /// Start playback of a set of items on the session (the `Play` command).
+    /// Takes `playCommand`, comma-delimited `itemIds`, and an optional
+    /// `startIndex` as query parameters. Used to jump to a tapped row in the
+    /// queue popover by resending the queue and starting at that index.
+    static func sessionPlaying(sessionId: String) -> String {
+        "/Sessions/\(sessionId)/Playing"
+    }
+
     /// General command sink for a session. Takes a `GeneralCommand` JSON body
     /// (`Name` + `Arguments`); used for `SetVolume`, which — unlike the
     /// transport commands — needs an argument and so can't use the simpler

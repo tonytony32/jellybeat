@@ -24,6 +24,9 @@ struct ControlsView: View {
     let onToggleFavorite: @MainActor () -> Void
     /// The active client's play queue, shown in the queue popover.
     let queue: [QueueItem]
+    /// Invoked when the user taps a row in the queue popover to jump to that
+    /// track. The popover dismisses itself first.
+    let onSelectQueueItem: @MainActor (QueueItem) -> Void
 
     @State private var hoveredAction: Action?
     @State private var favoriteHovered = false
@@ -140,12 +143,19 @@ struct ControlsView: View {
         .onHover { queueHovered = $0 }
         .animation(.spring(response: 0.22, dampingFraction: 0.65), value: queueHovered)
         .focusEffectDisabled()
-        // Emanate from the trailing edge so the list opens to the right, into
-        // empty screen space, instead of upward over the artwork/track frame.
-        // SwiftUI auto-flips to the leading side if the overlay is snapped
-        // against the screen's right edge and there's no room.
-        .popover(isPresented: $showQueue, arrowEdge: .trailing) {
-            QueuePopover(queue: queue)
+        // Open upward, above the controls, into open screen space. A
+        // side/`.trailing` popover is centred vertically on the button, so when
+        // the overlay sits low (near the Dock) the tall list overflows the
+        // bottom and AppKit shoves the whole overlay window *up* above the Dock
+        // to make room — which is exactly the "it jumps up" complaint. Anchored
+        // to `.top` the list grows into the empty space above instead, so the
+        // window never has to move. SwiftUI auto-flips to `.bottom` if the
+        // overlay is near the top of the screen.
+        .popover(isPresented: $showQueue, arrowEdge: .top) {
+            QueuePopover(queue: queue) { item in
+                showQueue = false
+                onSelectQueueItem(item)
+            }
         }
     }
 

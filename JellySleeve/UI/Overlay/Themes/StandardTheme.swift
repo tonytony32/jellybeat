@@ -77,7 +77,10 @@ private struct StandardBody: View {
                     onToggleFavorite: {
                         Task { @MainActor in await store.toggleFavorite() }
                     },
-                    queue: store.queue
+                    queue: store.queue,
+                    onSelectQueueItem: { item in
+                        Task { @MainActor in await store.playQueueItem(item) }
+                    }
                 )
                 .padding(.bottom, 6)
             }
