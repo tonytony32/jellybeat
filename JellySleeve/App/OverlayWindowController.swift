@@ -51,6 +51,9 @@ final class OverlayWindowController: NSObject {
     /// `player.isQueuePopoverOpen` is true.
     private var queuePanel: NSPanel?
     private var queueDismissMonitors: [Any] = []
+    /// Beak direction + position for the panel, so its tail points back at the
+    /// overlay. Updated each time the panel is positioned.
+    private let queueChrome = QueuePanelChrome()
 
     init(
         settings: SettingsStore,
@@ -569,7 +572,7 @@ extension OverlayWindowController {
             panel = existing
         } else {
             panel = QueuePanelWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 300, height: 380),
+                contentRect: NSRect(x: 0, y: 0, width: 300 + QueuePanelBeak.width, height: 380),
                 styleMask: [.borderless, .nonactivatingPanel],
                 backing: .buffered,
                 defer: false
@@ -586,6 +589,7 @@ extension OverlayWindowController {
                 rootView: QueuePanelView()
                     .environment(player)
                     .environment(artworkProvider)
+                    .environment(queueChrome)
             )
             queuePanel = panel
         }
@@ -597,20 +601,25 @@ extension OverlayWindowController {
             hosting.layoutSubtreeIfNeeded()
             let fit = hosting.fittingSize
             let height = fit.height > 1 ? min(fit.height, 380) : 380
-            panel.setContentSize(NSSize(width: 300, height: height))
+            panel.setContentSize(NSSize(width: 300 + QueuePanelBeak.width, height: height))
         }
         positionQueuePanel(panel, relativeTo: overlay)
         if panel.parent == nil {
             overlay.addChildWindow(panel, ordered: .above)
         }
         panel.makeKeyAndOrderFront(nil)
+        // The outline — and so the window's derived drop shadow — changes with
+        // the beak's side and height, so refresh it.
+        panel.invalidateShadow()
         installQueueDismissMonitors()
     }
 
-    /// Place the panel just to the right of the overlay (flipping to the left if
-    /// there's no room), bottom-aligned with it, then clamp fully inside the
-    /// visible frame so it's never under the Dock or menu bar. Only the panel
-    /// moves — the overlay is never touched.
+    /// Place the panel just beyond the overlay — to its right by default,
+    /// flipping to the left when there's no room — bottom-aligned with it, and
+    /// aim the panel's beak back at the overlay's center so it reads as having
+    /// sprung from it. Clamped to the physical screen (minus the menu bar) so it
+    /// can sit over the Dock just like the overlay. Only the panel moves — the
+    /// overlay is never touched.
     private func positionQueuePanel(_ panel: NSPanel, relativeTo overlay: NSWindow) {
         guard let screen = overlay.screen ?? NSScreen.main else { return }
         // Clamp to the physical screen (minus the menu bar), NOT the visible
@@ -620,12 +629,18 @@ extension OverlayWindowController {
         // hidden.
         let area = snapFrame(for: screen)
         let size = panel.frame.size
-        let gap: CGFloat = 8
         let o = overlay.frame
+        let tipGap = QueuePanelBeak.tipGap
 
-        var x = o.maxX + gap
+        // Prefer the panel to the right of the overlay with the beak pointing
+        // left back at it; flip to the left (beak pointing right) when there's
+        // no room. Only the beak's tip reaches toward the overlay — the card
+        // keeps its gap.
+        var edge: QueuePanelBeakEdge = .leading
+        var x = o.maxX + tipGap
         if x + size.width > area.maxX {
-            x = o.minX - gap - size.width
+            edge = .trailing
+            x = o.minX - tipGap - size.width
         }
         x = min(max(area.minX, x), area.maxX - size.width)
 
@@ -636,6 +651,16 @@ extension OverlayWindowController {
         y = min(max(area.minY, y), area.maxY - size.height)
 
         panel.setFrameOrigin(NSPoint(x: x, y: y))
+
+        // Aim the beak at the overlay's vertical center, expressed in
+        // panel-local points (y grows downward in the view) and kept clear of
+        // the panel's rounded corners.
+        let halfBase = QueuePanelBeak.height / 2
+        let minCenter = QueuePanelBeak.cornerRadius + halfBase + 4
+        let maxCenter = max(minCenter, size.height - minCenter)
+        let centerFromTop = (y + size.height) - o.midY
+        queueChrome.beakEdge = edge
+        queueChrome.beakCenterFromTop = min(max(minCenter, centerFromTop), maxCenter)
     }
 
     private func dismissQueuePanel() {

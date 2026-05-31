@@ -1,4 +1,5 @@
 import AppKit
+import Observation
 import SwiftUI
 
 /// Live wrapper hosted in the queue side-panel window: reads the queue from the
@@ -25,6 +26,23 @@ struct QueuePopover: View {
     /// Invoked with the tapped queue entry so the client jumps to it.
     let onSelect: (QueueItem) -> Void
 
+    /// Beak direction + position, written by `OverlayWindowController` when it
+    /// places the panel, so the tail points back at the overlay it opened from.
+    @Environment(QueuePanelChrome.self) private var chrome
+
+    /// The panel's outline: a rounded card with a small beak on the side facing
+    /// the overlay. Reused for both the glass clip and the hairline border so
+    /// the tail is part of one continuous shape with no seam.
+    private var outline: BubbleWithBeak {
+        BubbleWithBeak(
+            edge: chrome.beakEdge,
+            cornerRadius: QueuePanelBeak.cornerRadius,
+            beakWidth: QueuePanelBeak.width,
+            beakHeight: QueuePanelBeak.height,
+            beakCenterY: chrome.beakCenterFromTop
+        )
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Up Next")
@@ -41,18 +59,18 @@ struct QueuePopover: View {
         }
         .frame(width: 300)
         .frame(maxHeight: 380)
+        // Reserve the beak strip on the side facing the overlay so the header
+        // and list never slide under the tail.
+        .padding(chrome.beakEdge == .leading ? .leading : .trailing, QueuePanelBeak.width)
         // Dark frosted glass (the `.hudWindow` material stays dark regardless
-        // of the wallpaper behind it), clipped to a rounded rect with a hairline
-        // border — the panel window itself is borderless and transparent, so
-        // this is the panel's whole visible chrome. `colorScheme(.dark)` keeps
-        // text and badges light over the dark material.
+        // of the wallpaper behind it), clipped to the card+beak outline with a
+        // hairline border — the panel window itself is borderless and
+        // transparent, so this is the panel's whole visible chrome.
+        // `colorScheme(.dark)` keeps text and badges light over the dark glass.
         .background(GlassBackground())
         .colorScheme(.dark)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(.white.opacity(0.12), lineWidth: 1)
-        )
+        .clipShape(outline)
+        .overlay(outline.strokeBorder(.white.opacity(0.12), lineWidth: 1))
     }
 
     private var emptyState: some View {
@@ -201,5 +219,133 @@ private struct QueueThumbnail: View {
                     image = NSImage(data: data)
                 }
             }
+    }
+}
+
+// MARK: - Panel beak (the "where it came from" tail)
+
+/// Which vertical edge of the queue panel the beak sticks out of — always the
+/// side that faces the overlay.
+enum QueuePanelBeakEdge: Equatable {
+    case leading   // overlay is to the panel's left  → beak points left
+    case trailing  // overlay is to the panel's right → beak points right
+}
+
+/// Beak metrics, shared between the panel's drawing (`BubbleWithBeak`) and the
+/// window controller that sizes and positions the panel.
+enum QueuePanelBeak {
+    /// Panel corner radius (kept here so the shape and the corner-avoidance
+    /// clamp stay in agreement).
+    static let cornerRadius: CGFloat = 12
+    /// How far the beak protrudes past the card.
+    static let width: CGFloat = 8
+    /// Height of the beak's base where it meets the card.
+    static let height: CGFloat = 18
+    /// Gap left between the beak's tip and the overlay's edge.
+    static let tipGap: CGFloat = 2
+}
+
+/// View-layout hints for the panel's beak, written by `OverlayWindowController`
+/// when it positions the panel and read by `QueuePopover` to aim the tail. Kept
+/// separate from `PlayerStore` so window geometry never leaks into the playback
+/// model.
+@MainActor
+@Observable
+final class QueuePanelChrome {
+    var beakEdge: QueuePanelBeakEdge = .leading
+    /// Vertical center of the beak in panel-local points, measured from the top.
+    var beakCenterFromTop: CGFloat = 60
+}
+
+/// A rounded "card" with a small beak (speech-bubble tail) protruding from one
+/// vertical edge. The card and beak form one continuous outline, so filling it
+/// with glass and stroking its border draw a single seamless shape.
+struct BubbleWithBeak: InsettableShape {
+    var edge: QueuePanelBeakEdge
+    var cornerRadius: CGFloat
+    var beakWidth: CGFloat
+    var beakHeight: CGFloat
+    /// Vertical center of the beak, measured from the top of the shape.
+    var beakCenterY: CGFloat
+    var insetAmount: CGFloat = 0
+
+    func inset(by amount: CGFloat) -> some InsettableShape {
+        var copy = self
+        copy.insetAmount += amount
+        return copy
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let ia = insetAmount
+        let r = max(0, cornerRadius - ia)
+        let halfBase = max(0, beakHeight / 2 - ia)
+        let top = rect.minY + ia
+        let bottom = rect.maxY - ia
+        // Keep the beak on the straight part of the edge, clear of the corners.
+        let lo = top + r + halfBase
+        let hi = bottom - r - halfBase
+        let cy = min(max(beakCenterY, lo), max(lo, hi))
+
+        // Card body horizontal extent: the beak strip is carved off the side
+        // the tail protrudes from, so the rounded body never overlaps the beak.
+        let left: CGFloat
+        let right: CGFloat
+        let tipX: CGFloat
+        switch edge {
+        case .leading:
+            left = rect.minX + beakWidth + ia
+            right = rect.maxX - ia
+            tipX = rect.minX + ia
+        case .trailing:
+            left = rect.minX + ia
+            right = rect.maxX - beakWidth - ia
+            tipX = rect.maxX - ia
+        }
+
+        // Fraction of the tail length spanned by the softly-rounded apex, so the
+        // beak ends in a gentle point rather than a sharp spike.
+        let k: CGFloat = 0.35
+
+        let tl = CGPoint(x: left, y: top)
+        let tr = CGPoint(x: right, y: top)
+        let br = CGPoint(x: right, y: bottom)
+        let bl = CGPoint(x: left, y: bottom)
+
+        // One continuous outline (card + beak), traced clockwise in SwiftUI's
+        // y-down space. A single subpath — rather than a card plus an overlaid
+        // beak — means stroking the border leaves no seam where the tail joins
+        // the card. Corners use circular arcs; at r=12 the difference from a
+        // `.continuous` squircle is imperceptible and buys the seamless stroke.
+        var path = Path()
+        switch edge {
+        case .leading:
+            let apexX = left + (tipX - left) * (1 - k)
+            path.move(to: CGPoint(x: left + r, y: top))
+            path.addArc(tangent1End: tr, tangent2End: br, radius: r)   // top-right
+            path.addArc(tangent1End: br, tangent2End: bl, radius: r)   // bottom-right
+            path.addArc(tangent1End: bl, tangent2End: tl, radius: r)   // bottom-left
+            // up the left edge, out around the beak, back to the edge
+            path.addLine(to: CGPoint(x: left, y: cy + halfBase))
+            path.addLine(to: CGPoint(x: apexX, y: cy + halfBase * k))
+            path.addQuadCurve(to: CGPoint(x: apexX, y: cy - halfBase * k),
+                              control: CGPoint(x: tipX, y: cy))
+            path.addLine(to: CGPoint(x: left, y: cy - halfBase))
+            path.addArc(tangent1End: tl, tangent2End: tr, radius: r)   // top-left
+        case .trailing:
+            let apexX = right + (tipX - right) * (1 - k)
+            path.move(to: CGPoint(x: left + r, y: top))
+            path.addArc(tangent1End: tr, tangent2End: br, radius: r)   // top-right
+            // down the right edge, out around the beak, back to the edge
+            path.addLine(to: CGPoint(x: right, y: cy - halfBase))
+            path.addLine(to: CGPoint(x: apexX, y: cy - halfBase * k))
+            path.addQuadCurve(to: CGPoint(x: apexX, y: cy + halfBase * k),
+                              control: CGPoint(x: tipX, y: cy))
+            path.addLine(to: CGPoint(x: right, y: cy + halfBase))
+            path.addArc(tangent1End: br, tangent2End: bl, radius: r)   // bottom-right
+            path.addArc(tangent1End: bl, tangent2End: tl, radius: r)   // bottom-left
+            path.addArc(tangent1End: tl, tangent2End: tr, radius: r)   // top-left
+        }
+        path.closeSubpath()
+        return path
     }
 }
