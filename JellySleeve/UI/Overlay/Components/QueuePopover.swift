@@ -1,10 +1,25 @@
 import AppKit
 import SwiftUI
 
-/// Popover listing the active client's play queue (`NowPlayingQueueFullItems`
-/// from `/Sessions`), with the current track highlighted. Tapping a row jumps
-/// the client to that track (`onSelect`). Reachable from the list button in
-/// `ControlsView`.
+/// Live wrapper hosted in the queue side-panel window: reads the queue from the
+/// store so the list updates as playback advances, and jumps the client to a
+/// tapped row (closing the panel). The window itself is created and positioned
+/// by `OverlayWindowController` — to the right of the overlay, so it never
+/// covers the now-playing frame and never pushes the overlay around.
+struct QueuePanelView: View {
+    @Environment(PlayerStore.self) private var player
+
+    var body: some View {
+        QueuePopover(queue: player.queue) { item in
+            player.isQueuePopoverOpen = false
+            Task { @MainActor in await player.playQueueItem(item) }
+        }
+    }
+}
+
+/// The play-queue list ("Up Next") with the current track highlighted. Tapping
+/// a row jumps the client to that track (`onSelect`). Rendered inside the
+/// side-panel window managed by `OverlayWindowController`.
 struct QueuePopover: View {
     let queue: [QueueItem]
     /// Invoked with the tapped queue entry so the client jumps to it.
@@ -26,18 +41,18 @@ struct QueuePopover: View {
         }
         .frame(width: 300)
         .frame(maxHeight: 380)
-        // The overlay always renders as a dark HUD, but a popover lives in its
-        // own window whose default *vibrant* material blurs whatever bright
-        // content sits behind it — over a light wallpaper that reads near-white
-        // and clashed. Rather than flatten it with an opaque fill, lay the same
-        // `.hudWindow` glass the overlay uses over the content: that material is
-        // dark by design (it stays dark regardless of what's behind), so the
-        // popover keeps its translucent frosted feel while reliably reading
-        // dark. `darkAqua` on the window then darkens the remaining chrome
-        // (the arrow); `colorScheme(.dark)` keeps text/badges light over it.
+        // Dark frosted glass (the `.hudWindow` material stays dark regardless
+        // of the wallpaper behind it), clipped to a rounded rect with a hairline
+        // border — the panel window itself is borderless and transparent, so
+        // this is the panel's whole visible chrome. `colorScheme(.dark)` keeps
+        // text and badges light over the dark material.
         .background(GlassBackground())
         .colorScheme(.dark)
-        .background(PopoverDarkAppearance())
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+        )
     }
 
     private var emptyState: some View {
@@ -78,27 +93,6 @@ struct QueuePopover: View {
                     proxy.scrollTo(current.id, anchor: .center)
                 }
             }
-        }
-    }
-}
-
-/// Reaches the popover's backing `_NSPopoverWindow` and pins its appearance to
-/// dark, so the popover's own chrome (rounded frame, arrow, vibrant material)
-/// matches the dark overlay regardless of the system's Light/Dark setting.
-/// `colorScheme(.dark)` alone only affects SwiftUI content, not that chrome.
-///
-/// The appearance must be set when the view actually enters its window —
-/// doing it in `updateNSView` is unreliable because that first runs while the
-/// view's `window` is still nil and SwiftUI may not call it again. A custom
-/// `NSView` overriding `viewDidMoveToWindow` fires at exactly the right moment.
-private struct PopoverDarkAppearance: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView { AppearancePinningView() }
-    func updateNSView(_ nsView: NSView, context: Context) {}
-
-    final class AppearancePinningView: NSView {
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            window?.appearance = NSAppearance(named: .darkAqua)
         }
     }
 }

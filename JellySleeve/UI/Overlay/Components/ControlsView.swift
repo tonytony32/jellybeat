@@ -22,20 +22,14 @@ struct ControlsView: View {
     let isFavorite: Bool
     /// Toggles the favorite flag on the current track.
     let onToggleFavorite: @MainActor () -> Void
-    /// The active client's play queue, shown in the queue popover.
-    let queue: [QueueItem]
-    /// Invoked when the user taps a row in the queue popover to jump to that
-    /// track. The popover dismisses itself first.
-    let onSelectQueueItem: @MainActor (QueueItem) -> Void
-
-    /// Used only to publish the queue-popover open state so scroll-to-volume
-    /// can suspend itself while the list is up.
+    /// Drives the queue side panel: the list button toggles
+    /// `isQueuePopoverOpen`, and `OverlayWindowController` shows/positions the
+    /// panel window in response (also suspends scroll-to-volume while open).
     @Environment(PlayerStore.self) private var player
 
     @State private var hoveredAction: Action?
     @State private var favoriteHovered = false
     @State private var queueHovered = false
-    @State private var showQueue = false
 
     var body: some View {
         // Tight spacing because each button now claims a 44 pt hit target
@@ -64,9 +58,8 @@ struct ControlsView: View {
         .allowsHitTesting(opacity > 0)
         .animation(.easeInOut(duration: 0.2), value: isVisible)
         .animation(.easeInOut(duration: 0.2), value: isPaused)
-        .onChange(of: showQueue, initial: true) { _, open in
-            player.isQueuePopoverOpen = open
-        }
+        // If the controls disappear (theme swap, window teardown) don't leave
+        // the side panel orphaned.
         .onDisappear { player.isQueuePopoverOpen = false }
     }
 
@@ -138,7 +131,7 @@ struct ControlsView: View {
     @ViewBuilder
     private var queueButton: some View {
         Button {
-            showQueue.toggle()
+            player.isQueuePopoverOpen.toggle()
         } label: {
             Image(systemName: "list.bullet")
                 .font(.system(size: 14, weight: .semibold))
@@ -147,24 +140,10 @@ struct ControlsView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(String(localized: "Show queue"))
-        .scaleEffect(queueHovered ? 1.12 : 1.0)
+        .scaleEffect(queueHovered || player.isQueuePopoverOpen ? 1.12 : 1.0)
         .onHover { queueHovered = $0 }
         .animation(.spring(response: 0.22, dampingFraction: 0.65), value: queueHovered)
         .focusEffectDisabled()
-        // Open upward, above the controls, into open screen space. A
-        // side/`.trailing` popover is centred vertically on the button, so when
-        // the overlay sits low (near the Dock) the tall list overflows the
-        // bottom and AppKit shoves the whole overlay window *up* above the Dock
-        // to make room — which is exactly the "it jumps up" complaint. Anchored
-        // to `.top` the list grows into the empty space above instead, so the
-        // window never has to move. SwiftUI auto-flips to `.bottom` if the
-        // overlay is near the top of the screen.
-        .popover(isPresented: $showQueue, arrowEdge: .top) {
-            QueuePopover(queue: queue) { item in
-                showQueue = false
-                onSelectQueueItem(item)
-            }
-        }
     }
 
     private func scale(for action: Action) -> CGFloat {
