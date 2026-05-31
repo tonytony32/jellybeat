@@ -595,14 +595,15 @@ final class ClickableHostingView<Content: View>: NSHostingView<Content> {
             // partial step doesn't bleed into the new one.
             if event.phase.contains(.began) { scrollAccumulator = 0 }
             scrollAccumulator += deltaY
-            let pointsPerStep: CGFloat = 5
+            // Higher = slower: more scroll distance is needed per 1% of volume.
+            let pointsPerStep: CGFloat = 12
             let steps = (scrollAccumulator / pointsPerStep).rounded(.towardZero)
             guard steps != 0 else { return }
             scrollAccumulator -= steps * pointsPerStep
             amount = -Int(steps)
         } else {
-            // Legacy mouse wheel: each event is one discrete notch.
-            amount = deltaY > 0 ? -3 : 3
+            // Legacy mouse wheel: each event is one discrete notch → 1%.
+            amount = deltaY > 0 ? -1 : 1
         }
         onScrollVolume(amount)
     }

@@ -77,6 +77,11 @@ final class PlayerStore {
     /// cleared ~1 s after the last scroll tick.
     var volumeFeedback: Int? = nil
 
+    /// True while the queue popover is open. Scroll-to-change-volume is
+    /// suppressed in that state so the wheel scrolls the queue list instead of
+    /// fighting it.
+    var isQueuePopoverOpen: Bool = false
+
     // MARK: - Wired in by AppDelegate
 
     private var client: JellyfinClient?
@@ -501,6 +506,9 @@ final class PlayerStore {
     /// scroll ticks collapses into a single network call once the user pauses.
     func nudgeVolume(by delta: Int) {
         guard delta != 0 else { return }
+        // Suppressed while the queue popover is open so the wheel scrolls the
+        // queue list rather than changing volume behind it.
+        guard !isQueuePopoverOpen else { return }
         // Volume only means something when a client is actually playing.
         guard let current = currentTrack else { return }
         let newValue = min(100, max(0, volume + delta))

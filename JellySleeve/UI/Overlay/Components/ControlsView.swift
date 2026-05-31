@@ -28,6 +28,10 @@ struct ControlsView: View {
     /// track. The popover dismisses itself first.
     let onSelectQueueItem: @MainActor (QueueItem) -> Void
 
+    /// Used only to publish the queue-popover open state so scroll-to-volume
+    /// can suspend itself while the list is up.
+    @Environment(PlayerStore.self) private var player
+
     @State private var hoveredAction: Action?
     @State private var favoriteHovered = false
     @State private var queueHovered = false
@@ -60,6 +64,10 @@ struct ControlsView: View {
         .allowsHitTesting(opacity > 0)
         .animation(.easeInOut(duration: 0.2), value: isVisible)
         .animation(.easeInOut(duration: 0.2), value: isPaused)
+        .onChange(of: showQueue, initial: true) { _, open in
+            player.isQueuePopoverOpen = open
+        }
+        .onDisappear { player.isQueuePopoverOpen = false }
     }
 
     private var opacity: Double {
