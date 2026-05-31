@@ -77,6 +77,11 @@ final class PlayerStore {
     /// cleared ~1 s after the last scroll tick.
     var volumeFeedback: Int? = nil
 
+    /// True while the queue popover is open. Scroll-to-change-volume is
+    /// suppressed in that state so the wheel scrolls the queue list instead of
+    /// fighting it.
+    var isQueuePopoverOpen: Bool = false
+
     // MARK: - Wired in by AppDelegate
 
     private var client: JellyfinClient?
@@ -442,6 +447,20 @@ final class PlayerStore {
         }
     }
 
+    /// Jump playback to `item` in the play queue (tapped in the queue popover).
+    /// Resends the whole queue with `PlayNow` and a `startIndex`, so the client
+    /// keeps the same up-next order and just moves the playhead to that track.
+    /// Tapping the current track is a no-op.
+    func playQueueItem(_ item: QueueItem) async {
+        guard isLinkLive else { showTransient(unreachableHint); return }
+        guard !item.isCurrent else { return }
+        guard let startIndex = queue.firstIndex(where: { $0.id == item.id }) else { return }
+        let itemIds = queue.map(\.itemId)
+        await sendCommand(name: "play queue item") { client, sessionId in
+            try await client.play(sessionId: sessionId, itemIds: itemIds, startIndex: startIndex)
+        }
+    }
+
     /// Seek the currently playing track to an absolute `seconds` value.
     /// Updates the local snapshot optimistically so the progress bar moves
     /// before the WebSocket pushes the new state back from the server.
@@ -487,6 +506,9 @@ final class PlayerStore {
     /// scroll ticks collapses into a single network call once the user pauses.
     func nudgeVolume(by delta: Int) {
         guard delta != 0 else { return }
+        // Suppressed while the queue popover is open so the wheel scrolls the
+        // queue list rather than changing volume behind it.
+        guard !isQueuePopoverOpen else { return }
         // Volume only means something when a client is actually playing.
         guard let current = currentTrack else { return }
         let newValue = min(100, max(0, volume + delta))
