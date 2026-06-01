@@ -137,7 +137,6 @@ final class SettingsStore {
             ?? .alwaysOnTop
         let storedOpacity = defaults.double(forKey: Keys.windowOpacity)
         self.windowOpacity = storedOpacity == 0 ? 1.0 : storedOpacity
-
         // Decide the storage location for the API key.
         //
         // New default (this version onwards): Keychain.

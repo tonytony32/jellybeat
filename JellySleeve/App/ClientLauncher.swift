@@ -24,16 +24,60 @@ enum ClientLauncher {
 
     static func openJellyfin(_ url: URL) {
         if let appURL = findWebApp(matching: url) {
-            logger.notice("Launching Jellyfin via web app: \(appURL.lastPathComponent, privacy: .public)")
-            NSWorkspace.shared.openApplication(
-                at: appURL,
-                configuration: NSWorkspace.OpenConfiguration(),
-                completionHandler: nil
-            )
+            let config = NSWorkspace.OpenConfiguration()
+            // A deep link (e.g. `/web/#/queue`) must actually *navigate* the
+            // pinned web app to that route. `openApplication(at:)` only launches
+            // or re-activates the app and drops the URL on the floor — leaving
+            // the user on whatever screen it last showed. So for a routed URL,
+            // open it *with* the app explicitly: passing the app sidesteps the
+            // LaunchServices scheme gate (web apps only advertise
+            // `x-webkit-app-launch`, so http(s) URLs never resolve to them on
+            // their own — see the type doc above).
+            if url.fragment?.isEmpty == false {
+                logger.notice("Opening Jellyfin route in web app: \(appURL.lastPathComponent, privacy: .public)")
+                NSWorkspace.shared.open(
+                    [url],
+                    withApplicationAt: appURL,
+                    configuration: config,
+                    completionHandler: nil
+                )
+            } else {
+                // No specific route: just bring the web app forward wherever it
+                // was (the long-standing behaviour for the idle launch).
+                logger.notice("Launching Jellyfin via web app: \(appURL.lastPathComponent, privacy: .public)")
+                NSWorkspace.shared.openApplication(
+                    at: appURL,
+                    configuration: config,
+                    completionHandler: nil
+                )
+            }
             return
         }
         logger.notice("No matching Safari web app; falling back to default browser")
         NSWorkspace.shared.open(url)
+    }
+
+    /// Composes a hash-routed Jellyfin Web URL from the server base URL. Jellyfin
+    /// Web is a single-page app routed in the fragment, so the now-playing queue
+    /// list lives at `<base>/web/#/queue` — matching the web client's own
+    /// `showNowPlaying()` (`show('queue')`).
+    ///
+    /// The base comes straight from user settings, so it's normalised
+    /// defensively: a trailing slash, an explicit `/web` segment, or a leftover
+    /// query/fragment are all stripped before composing, while a sub-path install
+    /// is preserved (`https://host/jellyfin` → `https://host/jellyfin/web/#/queue`).
+    /// Falls back to `base` if the composed string isn't a valid URL.
+    nonisolated static func webRouteURL(base: URL, route: String) -> URL {
+        var origin = base.absoluteString
+        // Keep only scheme://host[:port]/path — drop any query/fragment.
+        if let cut = origin.firstIndex(where: { $0 == "#" || $0 == "?" }) {
+            origin = String(origin[..<cut])
+        }
+        while origin.hasSuffix("/") { origin.removeLast() }
+        // Don't double the SPA mount if the base already points at `/web`.
+        if origin.lowercased().hasSuffix("/web") { origin.removeLast(4) }
+        while origin.hasSuffix("/") { origin.removeLast() }
+        return URL(string: "\(origin)/web/#/\(route)") ?? base
     }
 
     // MARK: - Internals

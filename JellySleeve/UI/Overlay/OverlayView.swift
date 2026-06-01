@@ -303,6 +303,7 @@ private struct NothingPlayingView: View {
     let launchURL: URL?
     @Binding var isHovering: Bool
     let onLaunch: () -> Void
+    @Environment(WindowSnapState.self) private var snapState
 
     var body: some View {
         GeometryReader { geo in
@@ -310,8 +311,9 @@ private struct NothingPlayingView: View {
             // icon" across themes whose artwork sizes differ (Classic 120 →
             // Standard/Aero ~256).
             let side = min(geo.size.width, geo.size.height) * 0.5
+            let snapped = snapState.alignment != .center
 
-            ZStack {
+            ZStack(alignment: snapState.alignment) {
                 Color.clear.contentShape(Rectangle())
 
                 Image("JellyfinLogo")
@@ -322,6 +324,7 @@ private struct NothingPlayingView: View {
                     .foregroundStyle(.secondary)
                     .opacity(isHovering ? 0.95 : 0.35)
                     .scaleEffect(isHovering ? 1.0 : 0.97)
+                    .padding(snapped ? 8 : 0)
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
@@ -333,5 +336,7 @@ private struct NothingPlayingView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: isHovering)
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: snapState.alignment)
     }
 }
+
