@@ -148,6 +148,7 @@ final class OverlayWindowController: NSObject {
                 .environment(themes)
                 .environment(artworkProvider)
                 .environment(snapState)
+                .environment(queueChrome)
         )
         hosting.autoresizingMask = [.width, .height]
         hosting.frame = contentRect
@@ -606,7 +607,13 @@ extension OverlayWindowController {
             panel.hidesOnDeactivate = false
             panel.backgroundColor = .clear
             panel.isOpaque = false
-            panel.hasShadow = true
+            // No window shadow: on a borderless, transparent, non-rectangular
+            // window AppKit derives the shadow from the content's alpha and
+            // renders it as a hard dark contour hugging the card *and the beak* —
+            // the "ugly black frame line". The panel's own bright glass rim
+            // (drawn in `QueuePopover`) defines its edge instead, exactly like
+            // the Classic overlay, which also runs shadowless.
+            panel.hasShadow = false
             panel.isReleasedWhenClosed = false
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             panel.appearance = NSAppearance(named: .darkAqua)
@@ -633,9 +640,6 @@ extension OverlayWindowController {
             overlay.addChildWindow(panel, ordered: .above)
         }
         panel.makeKeyAndOrderFront(nil)
-        // The outline — and so the window's derived drop shadow — changes with
-        // the beak's side and height, so refresh it.
-        panel.invalidateShadow()
         installQueueDismissMonitors()
     }
 
@@ -677,13 +681,22 @@ extension OverlayWindowController {
 
         panel.setFrameOrigin(NSPoint(x: x, y: y))
 
-        // Aim the beak at the overlay's vertical center, expressed in
-        // panel-local points (y grows downward in the view) and kept clear of
-        // the panel's rounded corners.
+        // Aim the beak at the queue button it sprang from — the button sits low
+        // in the controls row, well below the overlay's center, so pointing at
+        // the center left the beak floating above the button. `ControlsView`
+        // publishes the button's center as points from the overlay's top; fall
+        // back to the overlay center until that's been laid out. Expressed in
+        // panel-local points (y grows downward) and kept clear of the corners.
         let halfBase = QueuePanelBeak.height / 2
         let minCenter = QueuePanelBeak.cornerRadius + halfBase + 4
         let maxCenter = max(minCenter, size.height - minCenter)
-        let centerFromTop = (y + size.height) - o.midY
+        let targetScreenY: CGFloat
+        if let buttonFromTop = queueChrome.queueButtonCenterFromOverlayTop {
+            targetScreenY = o.maxY - buttonFromTop
+        } else {
+            targetScreenY = o.midY
+        }
+        let centerFromTop = (y + size.height) - targetScreenY
         queueChrome.beakEdge = edge
         queueChrome.beakCenterFromTop = min(max(minCenter, centerFromTop), maxCenter)
     }
