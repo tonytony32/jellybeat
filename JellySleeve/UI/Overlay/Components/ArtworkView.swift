@@ -13,7 +13,6 @@ struct ArtworkView: View {
 
     @Environment(ArtworkCacheProvider.self) private var provider
     @Environment(SettingsStore.self) private var settings
-    @Environment(PlayerStore.self) private var player
     @State private var image: NSImage?
     @State private var isLoading: Bool = false
 
@@ -59,15 +58,8 @@ struct ArtworkView: View {
         .accessibilityHint(String(localized: "Double-click to open the Jellyfin client"))
         .help(String(localized: "Double-click to open Jellyfin"))
         .onTapGesture(count: 2) {
-            guard let base = settings.baseURL else { return }
-            // While a track is playing, jump straight to the now-playing queue
-            // list instead of dropping the user on the server's last screen
-            // (often the album/disc page). Otherwise (the idle "now browsing"
-            // sleeve) keep opening the server root.
-            if player.currentTrack != nil {
-                ClientLauncher.openJellyfin(ClientLauncher.webRouteURL(base: base, route: "queue"))
-            } else {
-                ClientLauncher.openJellyfin(base)
+            if let url = settings.baseURL {
+                ClientLauncher.openJellyfin(url)
             }
         }
         .task(id: LoadKey(itemId: itemId, tag: imageTag, cacheReady: provider.cache != nil)) {
