@@ -549,17 +549,20 @@ final class PlayerStore {
         }
     }
 
+    /// Volume sends are best-effort and intentionally silent on failure. Unlike
+    /// the one-shot transport commands (which gate on `isLinkLive` and toast
+    /// when the link is down), volume fires ~12×/s while scrolling and each
+    /// command is idempotent — it carries the absolute level, so a dropped tick
+    /// is corrected by the next one 80 ms later. A genuine outage already
+    /// surfaces through `connectionState` (the poller flips the link indicator),
+    /// so a per-tick toast would only spam noise that breaks the scroll's feel.
     private func sendVolume(_ value: Int, sessionId: String) async {
         guard let client else { return }
         do {
             try await client.setVolume(sessionId: sessionId, volume: value)
             Self.logger.notice("SetVolume \(value, privacy: .public) OK")
-        } catch let error as NetworkError {
-            Self.logger.error("SetVolume failed: \(String(describing: error), privacy: .public)")
-            showTransient(error.errorDescription ?? "Couldn't change volume.")
         } catch {
             Self.logger.error("SetVolume failed: \(String(describing: error), privacy: .public)")
-            showTransient(error.localizedDescription)
         }
     }
 
