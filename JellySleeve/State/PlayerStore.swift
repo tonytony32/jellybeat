@@ -99,9 +99,12 @@ final class PlayerStore {
     private var anticipatingTask: Task<Void, Never>?
     private var commandFeedbackTask: Task<Void, Never>?
     private var volumeFeedbackTask: Task<Void, Never>?
-    /// Debounces the actual `SetVolume` request so a flurry of scroll ticks
-    /// collapses into one network call once the user pauses.
+    /// Throttles `SetVolume` requests: fires immediately on the first tick,
+    /// then at most once every `volumeThrottleInterval` while scrolling.
     private var volumeSendTask: Task<Void, Never>?
+    /// When the last `SetVolume` request was actually dispatched to the server.
+    private var lastVolumeSentAt: Date?
+    private static let volumeThrottleInterval: TimeInterval = 0.08
     /// Timestamp of the last local volume change, used to ignore poll-driven
     /// volume updates briefly so an optimistic scroll doesn't snap back before
     /// the client has acknowledged the new level.
@@ -502,8 +505,8 @@ final class PlayerStore {
     /// to 0...100. Called repeatedly while the user scrolls over the overlay.
     ///
     /// The local level updates immediately (and flashes a readout) so scrolling
-    /// feels instant; the actual `SetVolume` request is debounced so a burst of
-    /// scroll ticks collapses into a single network call once the user pauses.
+    /// feels instant; the actual `SetVolume` request is throttled so the Jellyfin
+    /// client follows the knob in real time without flooding the server.
     func nudgeVolume(by delta: Int) {
         guard delta != 0 else { return }
         // Suppressed while the queue popover is open so the wheel scrolls the
@@ -522,23 +525,41 @@ final class PlayerStore {
         scheduleVolumeSend(to: newValue, sessionId: current.sessionId)
     }
 
-    /// Debounced `SetVolume` dispatch. Cancels any pending send and fires the
-    /// latest target ~250 ms after the last scroll tick.
+    /// Throttled `SetVolume` dispatch. Fires immediately on the first tick of a
+    /// gesture, then at most once every `volumeThrottleInterval` so the Jellyfin
+    /// client tracks the knob in real time rather than snapping at the end.
     private func scheduleVolumeSend(to value: Int, sessionId: String) {
         volumeSendTask?.cancel()
-        volumeSendTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 250_000_000)
-            guard !Task.isCancelled, let self, let client = self.client else { return }
-            do {
-                try await client.setVolume(sessionId: sessionId, volume: value)
-                Self.logger.notice("SetVolume \(value, privacy: .public) OK")
-            } catch let error as NetworkError {
-                Self.logger.error("SetVolume failed: \(String(describing: error), privacy: .public)")
-                self.showTransient(error.errorDescription ?? "Couldn't change volume.")
-            } catch {
-                Self.logger.error("SetVolume failed: \(String(describing: error), privacy: .public)")
-                self.showTransient(error.localizedDescription)
+        let elapsed = lastVolumeSentAt.map { Date().timeIntervalSince($0) } ?? .infinity
+        let remaining = Self.volumeThrottleInterval - elapsed
+
+        if remaining <= 0 {
+            lastVolumeSentAt = Date()
+            Task { @MainActor [weak self] in
+                await self?.sendVolume(value, sessionId: sessionId)
             }
+        } else {
+            volumeSendTask = Task { @MainActor [weak self] in
+                let ns = UInt64(remaining * 1_000_000_000)
+                try? await Task.sleep(nanoseconds: ns)
+                guard !Task.isCancelled, let self else { return }
+                self.lastVolumeSentAt = Date()
+                await self.sendVolume(value, sessionId: sessionId)
+            }
+        }
+    }
+
+    private func sendVolume(_ value: Int, sessionId: String) async {
+        guard let client else { return }
+        do {
+            try await client.setVolume(sessionId: sessionId, volume: value)
+            Self.logger.notice("SetVolume \(value, privacy: .public) OK")
+        } catch let error as NetworkError {
+            Self.logger.error("SetVolume failed: \(String(describing: error), privacy: .public)")
+            showTransient(error.errorDescription ?? "Couldn't change volume.")
+        } catch {
+            Self.logger.error("SetVolume failed: \(String(describing: error), privacy: .public)")
+            showTransient(error.localizedDescription)
         }
     }
 
