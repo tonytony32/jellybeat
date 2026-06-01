@@ -26,6 +26,10 @@ struct ControlsView: View {
     /// `isQueuePopoverOpen`, and `OverlayWindowController` shows/positions the
     /// panel window in response (also suspends scroll-to-volume while open).
     @Environment(PlayerStore.self) private var player
+    /// Shared geometry hints for the queue side panel. We publish the queue
+    /// button's vertical position into it so `OverlayWindowController` can aim
+    /// the panel's beak straight at the button.
+    @Environment(QueuePanelChrome.self) private var queueChrome
 
     @State private var hoveredAction: Action?
     @State private var favoriteHovered = false
@@ -139,6 +143,17 @@ struct ControlsView: View {
                 .overlayHitTarget()
         }
         .buttonStyle(.plain)
+        // Report the button's vertical center (measured from the top of the
+        // overlay window — `.global` in an NSHostingView is window-relative) so
+        // the controller can aim the queue panel's beak at it. `.global` rather
+        // than a fixed offset keeps it correct across every theme's layout.
+        .background(
+            GeometryReader { proxy in
+                Color.clear.onChange(of: proxy.frame(in: .global).midY, initial: true) { _, newY in
+                    queueChrome.queueButtonCenterFromOverlayTop = newY
+                }
+            }
+        )
         .accessibilityLabel(String(localized: "Show queue"))
         .scaleEffect(queueHovered || player.isQueuePopoverOpen ? 1.12 : 1.0)
         .onHover { queueHovered = $0 }

@@ -70,7 +70,20 @@ struct QueuePopover: View {
         .background(GlassBackground())
         .colorScheme(.dark)
         .clipShape(outline)
-        .overlay(outline.strokeBorder(.white.opacity(0.12), lineWidth: 1))
+        // A soft "lit-from-above" glass rim instead of a flat hairline: brighter
+        // along the top edge, fading to a whisper at the bottom. Reads as a
+        // polished edge rather than the murky dark contour the window's own
+        // shadow left around the card.
+        .overlay(
+            outline.strokeBorder(
+                LinearGradient(
+                    colors: [.white.opacity(0.35), .white.opacity(0.08)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                ),
+                lineWidth: 1
+            )
+        )
     }
 
     private var emptyState: some View {
@@ -255,6 +268,23 @@ final class QueuePanelChrome {
     var beakEdge: QueuePanelBeakEdge = .leading
     /// Vertical center of the beak in panel-local points, measured from the top.
     var beakCenterFromTop: CGFloat = 60
+    /// Vertical center of the "Up Next" (queue) button, measured in points from
+    /// the *top* of the overlay window. Published by `ControlsView` as it lays
+    /// out so `OverlayWindowController` can aim the beak straight at the button
+    /// it sprang from instead of at the overlay's center. `nil` until the button
+    /// has been laid out (controller falls back to the overlay center).
+    var queueButtonCenterFromOverlayTop: CGFloat?
+}
+
+/// Carries the queue button's vertical center (in overlay-window-top points) up
+/// from `ControlsView` to the root so it can be stored on `QueuePanelChrome`.
+/// A preference rather than a direct write keeps the geometry read on SwiftUI's
+/// post-layout pass (no "modifying state during update" churn).
+struct QueueButtonCenterKey: PreferenceKey {
+    static let defaultValue: CGFloat? = nil
+    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
+        value = nextValue() ?? value
+    }
 }
 
 /// A rounded "card" with a small beak (speech-bubble tail) protruding from one
