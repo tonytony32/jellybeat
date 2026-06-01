@@ -54,6 +54,10 @@ final class OverlayWindowController: NSObject {
     /// Beak direction + position for the panel, so its tail points back at the
     /// overlay. Updated each time the panel is positioned.
     private let queueChrome = QueuePanelChrome()
+    /// Published snap alignment — the corner or edge the window is currently
+    /// pinned to, or `.center` when free-floating. Read by `NothingPlayingView`
+    /// to align the idle Jellyfin logo toward the same anchor.
+    let snapState = WindowSnapState()
 
     init(
         settings: SettingsStore,
@@ -143,6 +147,7 @@ final class OverlayWindowController: NSObject {
                 .environment(player)
                 .environment(themes)
                 .environment(artworkProvider)
+                .environment(snapState)
         )
         hosting.autoresizingMask = [.width, .height]
         hosting.frame = contentRect
@@ -158,6 +163,7 @@ final class OverlayWindowController: NSObject {
         overlayWindow = window
         applyWindowSettings()
         restoreSavedPosition(for: window)
+        refreshSnapState()
     }
 
     private func observeWindowVisibility(_ window: NSWindow) {
@@ -383,6 +389,24 @@ final class OverlayWindowController: NSObject {
         suppressMoveCallback = false
     }
 
+    private func refreshSnapState() {
+        guard let window = overlayWindow else { return }
+        let e = currentSnapEdges(window: window)
+        let alignment: Alignment
+        switch (e.left, e.right, e.top, e.bottom) {
+        case (true, _, true, _): alignment = .topLeading
+        case (_, true, true, _): alignment = .topTrailing
+        case (true, _, _, true): alignment = .bottomLeading
+        case (_, true, _, true): alignment = .bottomTrailing
+        case (true, _, _, _): alignment = .leading
+        case (_, true, _, _): alignment = .trailing
+        case (_, _, true, _): alignment = .top
+        case (_, _, _, true): alignment = .bottom
+        default: alignment = .center
+        }
+        snapState.alignment = alignment
+    }
+
     private static func displayID(of screen: NSScreen) -> UInt32? {
         let key = NSDeviceDescriptionKey("NSScreenNumber")
         return (screen.deviceDescription[key] as? NSNumber)?.uint32Value
@@ -530,6 +554,7 @@ extension OverlayWindowController: NSWindowDelegate {
     func handleDragEnded() {
         guard let window = overlayWindow else { return }
         snapToEdgesIfClose(window)
+        refreshSnapState()
         if let screen = window.screen,
            let displayID = Self.displayID(of: screen) {
             settings.setOverlayPosition(window.frame.origin, forDisplay: displayID)
@@ -788,4 +813,14 @@ final class ClickableHostingView<Content: View>: NSHostingView<Content> {
         }
         onScrollVolume(amount)
     }
+}
+
+/// Publishes the screen corner or edge the overlay is currently snapped to.
+/// `.center` means the window is free-floating (not against any edge).
+/// Read by `NothingPlayingView` to anchor the idle Jellyfin logo toward the
+/// same snap corner so the icon feels glued to the screen edge.
+@MainActor
+@Observable
+final class WindowSnapState {
+    var alignment: Alignment = .center
 }
