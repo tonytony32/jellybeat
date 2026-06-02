@@ -82,6 +82,7 @@ final class OverlayWindowController: NSObject {
         watchAppearanceSettings()
         watchPlayerForAmbientMode()
         watchQueuePanel()
+        watchQueuePanelSize()
     }
 
     func shutdown() {
@@ -590,6 +591,39 @@ extension OverlayWindowController {
         }
     }
 
+    /// Re-fit and reposition the panel when its content height changes (the user
+    /// switched tabs, the Instant Mix list arrived, the queue grew). The panel
+    /// is a fixed-size AppKit window, so SwiftUI can't grow it from inside;
+    /// `QueuePopover` bumps `queueChrome.contentRevision` and we react here.
+    private func watchQueuePanelSize() {
+        withObservationTracking {
+            _ = queueChrome.contentRevision
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.refitQueuePanel()
+                self?.watchQueuePanelSize()
+            }
+        }
+    }
+
+    private func refitQueuePanel() {
+        guard player.isQueuePopoverOpen,
+              let panel = queuePanel,
+              let overlay = overlayWindow else { return }
+        fitQueuePanelHeight(panel)
+        positionQueuePanel(panel, relativeTo: overlay)
+    }
+
+    /// Size the panel to its current SwiftUI content, capped at 380 pt (the
+    /// ScrollView handles overflow beyond that).
+    private func fitQueuePanelHeight(_ panel: NSPanel) {
+        guard let hosting = panel.contentView else { return }
+        hosting.layoutSubtreeIfNeeded()
+        let fit = hosting.fittingSize
+        let height = fit.height > 1 ? min(fit.height, 380) : 380
+        panel.setContentSize(NSSize(width: 300 + QueuePanelBeak.width, height: height))
+    }
+
     private func presentQueuePanel() {
         guard let overlay = overlayWindow else { return }
 
@@ -629,12 +663,7 @@ extension OverlayWindowController {
         // Match the overlay's window level so it floats with it, and size to the
         // current content (short queue → short panel) up to the 380 pt cap.
         panel.level = overlay.level
-        if let hosting = panel.contentView {
-            hosting.layoutSubtreeIfNeeded()
-            let fit = hosting.fittingSize
-            let height = fit.height > 1 ? min(fit.height, 380) : 380
-            panel.setContentSize(NSSize(width: 300 + QueuePanelBeak.width, height: height))
-        }
+        fitQueuePanelHeight(panel)
         positionQueuePanel(panel, relativeTo: overlay)
         if panel.parent == nil {
             overlay.addChildWindow(panel, ordered: .above)
