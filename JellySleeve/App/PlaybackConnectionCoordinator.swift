@@ -100,9 +100,58 @@ final class PlaybackConnectionCoordinator {
             await self?.observeSocketStates(socket)
         }
 
-        Task {
-            await socket.start()
+        Task { [weak self, socket, client, config] in
+            guard let self else { return }
+            await self.probeAndStart(socket: socket, client: client, userId: config.userId)
         }
+
+        watchPlaybackForIntervalAdaptation()
+    }
+
+    /// Fetches the current session list before opening the WebSocket so the
+    /// subscription interval is tuned from the very first push. If any session
+    /// for this user is already playing → fast (1500 ms); otherwise → slow
+    /// (4000 ms, 4× less traffic while idle). On probe failure, defaults to
+    /// slow so a cold start with no active playback is always frugal.
+    private func probeAndStart(
+        socket: JellyfinSocketClient,
+        client: JellyfinClient,
+        userId: String
+    ) async {
+        var intervalMs = 4000
+        do {
+            let sessions = try await client.fetchSessions()
+            if sessions.contains(where: { $0.userId == userId && $0.nowPlayingItem != nil }) {
+                intervalMs = 1500
+            }
+        } catch {
+            Self.logger.notice("Session probe failed (\(error.localizedDescription, privacy: .public)); using slow interval.")
+        }
+        Self.logger.notice("Session probe → \(intervalMs, privacy: .public) ms")
+        await socket.start(intervalMs: intervalMs)
+    }
+
+    /// Adapts the WebSocket subscription interval whenever `currentTrack`
+    /// changes. Playing → 1500 ms; idle → 4000 ms. `setSessionsInterval` is a
+    /// no-op when the socket is not connected, so stale values are stored and
+    /// applied automatically on the next `start()`.
+    private func watchPlaybackForIntervalAdaptation() {
+        withObservationTracking {
+            _ = player.currentTrack
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.adaptSessionsInterval()
+                self.watchPlaybackForIntervalAdaptation()
+            }
+        }
+    }
+
+    private func adaptSessionsInterval() {
+        guard let socket = socketClient else { return }
+        let ms = player.currentTrack != nil ? 1500 : 4000
+        Self.logger.notice("Sessions interval adapted → \(ms, privacy: .public) ms")
+        Task { await socket.setSessionsInterval(ms) }
     }
 
     func stop() {

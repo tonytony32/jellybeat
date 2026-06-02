@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>JellySleeve · WebSocket Timeline</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background: #06080f;
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  padding: 32px 36px 44px;
+}
+h1 { font-size: 15.5px; font-weight: 600; color: #ccd0e6; letter-spacing: -.2px; margin-bottom: 4px; }
+.sub { font-size: 11px; color: #354068; margin-bottom: 20px; }
+.wrap { overflow-x: auto; }
+canvas { display: block; }
+</style>
+</head>
+<body>
+<h1>JellySleeve · Flujo de mensajes WebSocket</h1>
+<p class="sub">Secuencia real de conexión · Frecuencia y tamaño de mensajes en escala log₂</p>
+<div class="wrap"><canvas id="c"></canvas></div>
+
+<script>
+(function () {
+
+const dpr = window.devicePixelRatio || 1;
+const LW = 1420, LH = 620;
+const cv = document.getElementById('c');
+cv.width  = LW * dpr;
+cv.height = LH * dpr;
+cv.style.width  = LW + 'px';
+cv.style.height = LH + 'px';
+const g = cv.getContext('2d');
+g.scale(dpr, dpr);
+
+// ── Layout ──────────────────────────────────────────────────────
+const ML = 172, MR = 24, TOTAL = 200;
+const TW  = LW - ML - MR;
+const pps = TW / TOTAL;         // pixels per second
+
+const PHASE_Y  = 22;   // phase label centre
+const EVT_Y    = 54;   // event dot centre
+const L1_BASE  = 258;  // Sessions push baseline (Server→JS)
+const L2_BASE  = 360;  // HTTP baseline (WebPlayer→Server)
+const L3_BASE  = 422;  // Outgoing WS baseline (JS→Server)
+const WS_Y     = 436;  // WebSocket open indicator bar
+const TAXIS_Y  = 455;  // time axis
+const LEG_Y    = 492;  // legend row 1
+const LEG_Y2   = 512;  // legend row 2
+
+const MAX1 = L1_BASE - EVT_Y - 14;       // ~190px — Sessions push bars
+const MAX2 = L2_BASE - L1_BASE - 16;     // ~86px  — HTTP bars
+const MAX3 = L3_BASE - L2_BASE - 12;     // ~50px  — Outgoing bars
+
+// ── Primitives ──────────────────────────────────────────────────
+const tx = t => ML + t * pps;
+
+function logH(bytes, maxH) {
+  const lo = Math.log2(80), hi = Math.log2(5800);
+  return Math.max(3, ((Math.log2(Math.max(80, bytes)) - lo) / (hi - lo)) * maxH);
+}
+
+function bar(x, base, h, color, w) {
+  g.fillStyle = color;
+  g.fillRect(x - (w || 2.5) / 2, base - h, (w || 2.5), h);
+}
+
+function hline(y, col) {
+  g.strokeStyle = col || '#181d38';
+  g.lineWidth = 1;
+  g.beginPath(); g.moveTo(ML, y); g.lineTo(ML + TW, y); g.stroke();
+}
+
+function vline(x, y1, y2, col, lw, dash) {
+  g.save();
+  g.strokeStyle = col || '#ffffff';
+  g.lineWidth = lw || 1;
+  if (dash) g.setLineDash(dash);
+  g.beginPath(); g.moveTo(x, y1); g.lineTo(x, y2); g.stroke();
+  g.setLineDash([]);
+  g.restore();
+}
+
+function txt(s, x, y, col, size, align, base) {
+  g.save();
+  g.font = `${size || 11}px -apple-system, sans-serif`;
+  g.fillStyle = col || '#8090c0';
+  g.textAlign = align || 'center';
+  g.textBaseline = base || 'middle';
+  g.fillText(s, x, y);
+  g.restore();
+}
+
+// ── Background ──────────────────────────────────────────────────
+g.fillStyle = '#0b0d1c';
+g.fillRect(0, 0, LW, LH);
+
+// ── Phase bands ─────────────────────────────────────────────────
+const phases = [
+  { s:0,   e:8,   lab:'Sin clientes',          bg:'#0d1025' },
+  { s:8,   e:20,  lab:'Solo JellySleeve',       bg:'#0b180d' },
+  { s:20,  e:35,  lab:'Web Player abierto',     bg:'#17120a' },
+  { s:35,  e:60,  lab:'▶  Reproduciendo',       bg:'#170a0a' },
+  { s:60,  e:120, lab:'WP cerrado · grace 60s', bg:'#0e0a22' },
+  { s:120, e:200, lab:'Sin sesión en UI',        bg:'#09091c' },
+];
+
+phases.forEach(p => {
+  g.fillStyle = p.bg;
+  g.fillRect(tx(p.s), 0, (p.e - p.s) * pps, TAXIS_Y);
+  txt(p.lab, tx(p.s) + (p.e - p.s) * pps / 2, PHASE_Y, '#2c3860', 10);
+  if (p.s > 0) vline(tx(p.s), 0, TAXIS_Y, '#17203a', 1, [3, 4]);
+});
+
+// ── Lane baselines ───────────────────────────────────────────────
+hline(L1_BASE, '#1e2645');
+hline(L2_BASE, '#1e2645');
+hline(L3_BASE, '#1e2645');
+hline(TAXIS_Y, '#242e5c');
+
+// ── Lane labels ─────────────────────────────────────────────────
+// Lane 1: Server → JellySleeve
+txt('Servidor →',          ML-10, L1_BASE-46, '#50619a', 11, 'right');
+txt('JellySleeve',         ML-10, L1_BASE-33, '#50619a', 11, 'right');
+txt('Sessions · ×1.5 s',  ML-10, L1_BASE-18, '#2e3a68', 9.5, 'right');
+txt('(WebSocket push)',    ML-10, L1_BASE- 7, '#222840', 8.5, 'right');
+
+// Lane 2: Web Player → Server
+txt('Web Player →',        ML-10, L2_BASE-38, '#9a7040', 11, 'right');
+txt('Servidor',            ML-10, L2_BASE-25, '#9a7040', 11, 'right');
+txt('HTTP POST /Sessions', ML-10, L2_BASE-12, '#503820', 9.5, 'right');
+
+// Lane 3: JellySleeve → Server
+txt('JellySleeve →',       ML-10, L3_BASE-36, '#368060', 11, 'right');
+txt('Servidor',            ML-10, L3_BASE-23, '#368060', 11, 'right');
+txt('WebSocket saliente',  ML-10, L3_BASE-11, '#1f4a38', 9.5, 'right');
+
+// ── WebSocket open indicator bar ────────────────────────────────
+g.fillStyle = '#152e22';
+g.fillRect(tx(8), WS_Y, tx(200) - tx(8), 4);
+txt('── WebSocket abierto ──────────────────────────────────────────────────────────────────────────────────', tx(8) + 6, WS_Y + 2, '#1e3f2c', 8, 'left', 'middle');
+
+// ── Sessions pushes (Server → JellySleeve) ──────────────────────
+//
+// CLAVE: el servidor Jellyfin mantiene la sesión en memoria ~30 min.
+// El tamaño del push NO baja cuando el browser cierra (t=60).
+// JellySleeve descarta la sesión de la UI a t=120, pero el tráfico
+// sigue igual hasta que el servidor la expire.
+//
+function pushSize(t) {
+  if (t < 20)  return 150;   // empty []
+  if (t < 35)  return 1100;  // idle session (device info only)
+  return 5000;               // full session (NowPlayingItem + metadata)
+                             // ... incluye stale tras t=60
+}
+
+function pushColor(t) {
+  if (t < 20)  return '#1a2c72';   // dim — sin sesión
+  if (t < 35)  return '#2a4ea8';   // medio — sesión idle
+  if (t < 60)  return '#4080ee';   // vivo — reproduciendo, JellySleeve muestra
+  if (t < 120) return '#2e62cc';   // stale (grace) — JellySleeve aún muestra
+  return '#1e3e80';                // stale (dropped) — tráfico continúa, UI vacía
+}
+
+for (let t = 9.5; t < 200; t += 1.5) {
+  bar(tx(t), L1_BASE, logH(pushSize(t), MAX1), pushColor(t));
+}
+
+// Size labels at key moments
+const szLabels = [
+  { t:13,  sz:150,  col:'#253078', lab:'~150 B' },
+  { t:27,  sz:1100, col:'#2f52a8', lab:'~1.1 KB' },
+  { t:45,  sz:5000, col:'#4080ee', lab:'~5 KB' },
+  { t:88,  sz:5000, col:'#2e62cc', lab:'~5 KB' },
+  { t:158, sz:5000, col:'#1e3e80', lab:'~5 KB\n(servidor no ha expirado)' },
+];
+szLabels.forEach(({ t, sz, col, lab }) => {
+  const h = logH(sz, MAX1);
+  const lines = lab.split('\n');
+  lines.forEach((l, i) => {
+    txt(l, tx(t), L1_BASE - h - 5 - (lines.length - 1 - i) * 11, col + 'dd', 9, 'center', 'bottom');
+  });
+});
+
+// "JellySleeve descarta UI" callout at t=120
+{
+  const x = tx(120);
+  const h = logH(5000, MAX1);
+  vline(x, L1_BASE - h - 30, L1_BASE - h, '#8866ccaa', 1, [2, 3]);
+  txt('descartada', x, L1_BASE - h - 40, '#8866cc', 9, 'center', 'bottom');
+  txt('por UI ↓',   x, L1_BASE - h - 30, '#6a50aa', 9, 'center', 'bottom');
+  txt('(tráfico idéntico)', x, L1_BASE - h - 20, '#4a3880', 8.5, 'center', 'bottom');
+}
+
+// ── HTTP heartbeats (Web Player → Server) ───────────────────────
+const httpMsgs = [
+  { t:20.5, sz:450, lab:'register' },
+  { t:35,   sz:290, lab:'hb' },
+  { t:45,   sz:285, lab:'hb' },
+  { t:55,   sz:285, lab:'hb' },
+  { t:59.5, sz:285, lab:'hb ← último' },
+];
+httpMsgs.forEach(({ t, sz, lab }) => {
+  const h = logH(sz, MAX2);
+  bar(tx(t), L2_BASE, h, '#c87030', 5);
+  const isLong = lab.includes('último');
+  txt(lab, tx(t) + (isLong ? 28 : 0), L2_BASE - h - 3, '#905028cc', 8.5, 'center', 'bottom');
+});
+// Size annotation
+txt('~285–450 B', tx(42), L2_BASE - logH(290, MAX2) - 15, '#705028', 9);
+// Arrow showing heartbeat interval
+{
+  const y = L2_BASE - logH(290, MAX2) / 2;
+  const x1 = tx(35) + 3, x2 = tx(45) - 3;
+  g.strokeStyle = '#50381880';
+  g.lineWidth = 0.8;
+  g.beginPath(); g.moveTo(x1, y); g.lineTo(x2, y); g.stroke();
+  txt('~10 s', (x1+x2)/2, y - 5, '#503018', 8.5);
+}
+
+// ── Outgoing WebSocket (JellySleeve → Server) ───────────────────
+// SessionsStart (one-time at connect)
+{
+  const h = logH(48, MAX3);
+  bar(tx(8.2), L3_BASE, h, '#30cc80', 4.5);
+  txt('SessionsStart', tx(8.2), L3_BASE - h - 3, '#28aa60cc', 8.5, 'center', 'bottom');
+  txt('~48 B · "intervalMs:1500"', tx(8.2), L3_BASE - h - 14, '#1a7844', 8, 'center', 'bottom');
+}
+
+// KeepAlive every 30s from t=38
+const kaH = logH(32, MAX3);
+for (let t = 38; t < 200; t += 30) {
+  bar(tx(t), L3_BASE, kaH, '#22aa60', 3.5);
+}
+// Label on first one
+{
+  const t = 38;
+  txt('KeepAlive',     tx(t), L3_BASE - kaH - 12, '#1c8848', 8.5, 'center', 'bottom');
+  txt('×30s · ~32 B', tx(t), L3_BASE - kaH -  2, '#146038', 8, 'center', 'bottom');
+  // bracket showing 30s interval
+  const x1 = tx(38) + 3, x2 = tx(68) - 3;
+  const yb = L3_BASE + 10;
+  g.strokeStyle = '#1a5030';
+  g.lineWidth = 0.8;
+  g.beginPath();
+  g.moveTo(x1, yb); g.lineTo(x1, yb+4);
+  g.moveTo(x1, yb+4); g.lineTo(x2, yb+4);
+  g.moveTo(x2, yb); g.lineTo(x2, yb+4);
+  g.stroke();
+  txt('30 s', (x1+x2)/2, yb+4, '#144028', 7.5, 'center', 'top');
+}
+
+// ── Event markers ───────────────────────────────────────────────
+const events = [
+  { t:0,   lab:['Servidor',   'arranca'],        col:'#4477dd' },
+  { t:8,   lab:['JellySleeve','arranca'],         col:'#33cc77' },
+  { t:20,  lab:['Web Player', 'abre'],            col:'#cc8833' },
+  { t:35,  lab:['▶  Play'],                       col:'#ee4444' },
+  { t:60,  lab:['Web Player', 'cierra'],          col:'#cc44aa' },
+  { t:120, lab:['Sesión', 'descartada (UI)'],     col:'#8866cc' },
+];
+
+events.forEach(({ t, lab, col }) => {
+  const x = tx(t);
+  vline(x, EVT_Y + 9, TAXIS_Y, col + '30', 1, [2, 4]);
+  // halo
+  g.fillStyle = col + '22';
+  g.beginPath(); g.arc(x, EVT_Y, 8, 0, Math.PI * 2); g.fill();
+  // dot
+  g.fillStyle = col;
+  g.beginPath(); g.arc(x, EVT_Y, 4, 0, Math.PI * 2); g.fill();
+  // label
+  lab.forEach((l, i) => {
+    txt(l, x, EVT_Y - 9 - (lab.length - 1 - i) * 13, col, 10, 'center', 'bottom');
+  });
+});
+
+// ── Time axis ───────────────────────────────────────────────────
+for (let t = 0; t <= 200; t += 10) {
+  const x = tx(t);
+  const major = t % 20 === 0;
+  vline(x, TAXIS_Y, TAXIS_Y + (major ? 5 : 3), major ? '#2a3560' : '#181d38', 1);
+  if (major) txt(t + 's', x, TAXIS_Y + 9, '#2a3560', 10, 'center', 'top');
+}
+txt('tiempo →', ML + TW, TAXIS_Y + 9, '#1e2850', 9.5, 'right', 'top');
+
+// ── Size scale (right side) ──────────────────────────────────────
+// Small reference ruler
+const scaleX = ML + TW + 6;
+const scaleRef = [
+  { b:150,  label:'150 B' },
+  { b:1100, label:'1 KB'  },
+  { b:5000, label:'5 KB'  },
+];
+scaleRef.forEach(({ b, label }) => {
+  const y = L1_BASE - logH(b, MAX1);
+  g.strokeStyle = '#1e2440';
+  g.lineWidth = 0.7;
+  g.setLineDash([2, 3]);
+  g.beginPath(); g.moveTo(ML, y); g.lineTo(ML + TW, y); g.stroke();
+  g.setLineDash([]);
+  txt(label, scaleX + 2, y, '#1e2840', 8, 'left', 'middle');
+});
+
+// ── Legend ───────────────────────────────────────────────────────
+// Row 1: Sessions push state colors
+const pushLegend = [
+  { col:'#1a2c72', lab:'Sessions: sin sesión (~150 B)' },
+  { col:'#2a4ea8', lab:'Sessions: idle (~1.1 KB)' },
+  { col:'#4080ee', lab:'Sessions: reproduciendo (~5 KB)' },
+  { col:'#2e62cc', lab:'Sessions: stale · grace period (JellySleeve muestra)' },
+  { col:'#1e3e80', lab:'Sessions: stale · descartada (tráfico = igual; servidor no ha expirado)' },
+];
+g.save();
+g.font = '9.5px -apple-system, sans-serif';
+let lx = ML;
+pushLegend.forEach(({ col, lab }) => {
+  g.fillStyle = col;
+  g.fillRect(lx, LEG_Y, 8, 10);
+  g.fillStyle = '#3a4878';
+  g.textAlign = 'left';
+  g.textBaseline = 'middle';
+  g.fillText(lab, lx + 11, LEG_Y + 5);
+  lx += g.measureText(lab).width + 30;
+});
+g.restore();
+
+// Row 2: Other message types + scale note
+const otherLegend = [
+  { col:'#c87030', lab:'HTTP heartbeat · Web Player→Servidor (~285–450 B · cada ~10 s)' },
+  { col:'#30cc80', lab:'WebSocket saliente · SessionsStart + KeepAlive (~32–48 B · cada 30 s)' },
+];
+g.save();
+g.font = '9.5px -apple-system, sans-serif';
+lx = ML;
+otherLegend.forEach(({ col, lab }) => {
+  g.fillStyle = col;
+  g.fillRect(lx, LEG_Y2, 8, 10);
+  g.fillStyle = '#3a4878';
+  g.textAlign = 'left';
+  g.textBaseline = 'middle';
+  g.fillText(lab, lx + 11, LEG_Y2 + 5);
+  lx += g.measureText(lab).width + 30;
+});
+g.restore();
+
+txt('↕ altura = log₂ bytes · líneas grises = 150 B / 1 KB / 5 KB',
+    LW - MR - 6, LEG_Y2 + 5, '#22284c', 9, 'right', 'middle');
+
+// ── Insight annotation ───────────────────────────────────────────
+// Arrow pointing to stale traffic after t=120 with key insight
+{
+  const x1 = tx(140), x2 = tx(175);
+  const y  = L1_BASE - logH(5000, MAX1) * 0.55;
+  // Bracket span
+  g.strokeStyle = '#1e3e80aa';
+  g.lineWidth = 1;
+  g.setLineDash([3, 3]);
+  g.beginPath();
+  g.moveTo(tx(120), y);
+  g.lineTo(tx(200), y);
+  g.stroke();
+  g.setLineDash([]);
+  // Small tick at start
+  vline(tx(120), y - 4, y + 4, '#1e3e80aa', 1);
+  // Label
+  txt('El servidor Jellyfin guarda la sesión ~30 min.',
+      tx(160), y - 5, '#1e3e80', 9, 'center', 'bottom');
+  txt('JellySleeve la descartó pero el push de 5 KB sigue cada 1.5 s.',
+      tx(160), y + 5, '#162e60', 8.5, 'center', 'top');
+}
+
+})();
+</script>
+</body>
+</html>
