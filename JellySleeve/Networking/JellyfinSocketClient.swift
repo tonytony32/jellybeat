@@ -45,6 +45,10 @@ actor JellyfinSocketClient {
     /// Set to true before any intentional close so the receiveLoop's catch
     /// block doesn't misread the resulting URLError as a real failure.
     private var stoppedIntentionally = false
+    /// The `SessionsStart` interval last sent to the server. Persisted so
+    /// reconnects (sleep/wake, failure recovery) reuse the last known value
+    /// instead of always defaulting to the fast interval.
+    private var sessionsIntervalMs: Int = 1500
 
     /// Stream of state transitions. AppDelegate observes this to drive its
     /// "WebSocket connected → polling stopped" / "WebSocket failed → polling
@@ -73,7 +77,25 @@ actor JellyfinSocketClient {
         self.stateContinuation = continuation
     }
 
-    func start() async {
+    /// Update the `SessionsStart` interval on a live connection. If the socket
+    /// is not currently connected the new value is stored and applied on the
+    /// next `start()` call.
+    func setSessionsInterval(_ ms: Int) async {
+        sessionsIntervalMs = ms
+        guard state == .connected else { return }
+        do {
+            try await send(.sessionsStart(intervalMs: ms))
+            Self.logger.notice("Sessions interval → \(ms, privacy: .public) ms")
+        } catch {
+            Self.logger.error("Sessions interval update failed: \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    /// - Parameter intervalMs: Override the `SessionsStart` subscription
+    ///   interval for this connection. Pass `nil` to reuse the last value
+    ///   (useful for transparent reconnects after sleep/wake or failures).
+    func start(intervalMs: Int? = nil) async {
+        if let ms = intervalMs { sessionsIntervalMs = ms }
         // Cancel any in-flight task before opening a new one so we never have
         // two concurrent WebSocket connections to the same server. Set the
         // intentional-stop flag first so the old receiveLoop's catch block
@@ -104,7 +126,7 @@ actor JellyfinSocketClient {
 
         // Subscribe to the Sessions stream.
         do {
-            try await send(.sessionsStart(intervalMs: 1500))
+            try await send(.sessionsStart(intervalMs: sessionsIntervalMs))
         } catch {
             Self.logger.error("Socket SessionsStart failed: \(String(describing: error), privacy: .public)")
             await transition(to: .failed("Couldn't subscribe to Sessions."))

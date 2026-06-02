@@ -103,6 +103,11 @@ actor PlaybackPoller {
                 consecutiveFailures = 0
                 await sleepBeforeNextTick(baseDelay: baseDelay)
             case .transient(let offline):
+                // A cancelled task (e.g. the WebSocket just reconnected and
+                // stopped the poller) can produce a spurious .transient result
+                // via URLError.cancelled. Don't stamp .reconnecting in that
+                // case — the coordinator has already set the state to .connected.
+                guard !Task.isCancelled else { return }
                 consecutiveFailures += 1
                 // Surface the dropped link immediately rather than leaving the
                 // overlay showing a stale `.connected` track the user can't

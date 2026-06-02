@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let windowController: OverlayWindowController
     private let connection: PlaybackConnectionCoordinator
     private var mediaCenter: MediaCenterController?
+    private var phoneCallMonitor: PhoneCallMonitor?
 
     override init() {
         let settings = SettingsStore()
@@ -65,6 +66,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowController.startObserving()
         activateMediaCenter()
         windowController.closeRestoredScenesExceptOverlay()
+
+        phoneCallMonitor = PhoneCallMonitor(player: player)
 
         applyPresence(settings.appPresence)
         trackPresenceChanges()
