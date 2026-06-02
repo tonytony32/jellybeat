@@ -65,6 +65,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowController.startObserving()
         activateMediaCenter()
         windowController.closeRestoredScenesExceptOverlay()
+
+        applyPresence(settings.appPresence)
+        trackPresenceChanges()
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { showOverlay() }
+        return true
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -82,6 +90,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func showOverlay() {
         windowController.showOverlay()
+    }
+
+    // MARK: - App presence
+
+    private func applyPresence(_ presence: AppPresence) {
+        NSApp.setActivationPolicy(presence.showsDock ? .regular : .accessory)
+    }
+
+    private func trackPresenceChanges() {
+        withObservationTracking {
+            _ = settings.appPresence
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.applyPresence(self.settings.appPresence)
+                self.trackPresenceChanges()
+            }
+        }
     }
 
     // MARK: - Now Playing bridge

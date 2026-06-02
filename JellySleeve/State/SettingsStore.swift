@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import os
+import ServiceManagement
 
 /// User-facing configuration of the Jellyfin connection.
 ///
@@ -52,6 +53,28 @@ final class SettingsStore {
     var refreshRate: TimeInterval {
         didSet {
             UserDefaults.standard.set(refreshRate, forKey: Keys.refreshRate)
+        }
+    }
+
+    // MARK: General
+
+    var appPresence: AppPresence {
+        didSet {
+            UserDefaults.standard.set(appPresence.rawValue, forKey: Keys.appPresence)
+        }
+    }
+
+    var launchAtLogin: Bool {
+        didSet {
+            do {
+                if launchAtLogin {
+                    try SMAppService.mainApp.register()
+                } else {
+                    try SMAppService.mainApp.unregister()
+                }
+            } catch {
+                Self.logger.warning("Launch at login toggle failed: \(String(describing: error), privacy: .public)")
+            }
         }
     }
 
@@ -123,6 +146,9 @@ final class SettingsStore {
 
     init() {
         let defaults = UserDefaults.standard
+
+        self.appPresence = AppPresence(rawValue: defaults.string(forKey: Keys.appPresence) ?? "") ?? .dockAndMenuBar
+        self.launchAtLogin = SMAppService.mainApp.status == .enabled
 
         self.baseURLString = (defaults.string(forKey: Keys.baseURL) ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -226,6 +252,7 @@ final class SettingsStore {
     }
 
     enum Keys {
+        static let appPresence = "settings.appPresence"
         static let baseURL = "settings.baseURL"
         static let userId = "settings.userId"
         static let allowSelfSigned = "settings.allowSelfSigned"
@@ -275,6 +302,25 @@ final class SettingsStore {
     }
 
     private static let deviceIdKey = "settings.deviceId"
+}
+
+nonisolated enum AppPresence: String, CaseIterable, Identifiable, Sendable {
+    case dockAndMenuBar
+    case menuBarOnly
+    case dockOnly
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .dockAndMenuBar: return "Dock & Menu Bar"
+        case .menuBarOnly:    return "Menu Bar Only"
+        case .dockOnly:       return "Dock Only"
+        }
+    }
+
+    var showsMenuBar: Bool { self == .menuBarOnly || self == .dockAndMenuBar }
+    var showsDock: Bool    { self == .dockOnly    || self == .dockAndMenuBar }
 }
 
 /// Cross-theme overlay window placement. Persisted in `SettingsStore`.

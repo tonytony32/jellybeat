@@ -4,6 +4,14 @@ import SwiftUI
 @main
 struct JellySleeveApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    // Mirrors settings.appPresence in UserDefaults so the App body reacts when
+    // the user changes it from the Settings window (which lives in a different
+    // SwiftUI subtree). @AppStorage watches the same key SettingsStore writes.
+    @AppStorage("settings.appPresence") private var appPresence: String = AppPresence.dockAndMenuBar.rawValue
+
+    private var menuBarIsInserted: Bool {
+        AppPresence(rawValue: appPresence)?.showsMenuBar ?? true
+    }
 
     var body: some Scene {
         Settings {
@@ -13,7 +21,10 @@ struct JellySleeveApp: App {
                 .environment(appDelegate.player)
         }
 
-        MenuBarExtra("JellySleeve", systemImage: "music.note") {
+        MenuBarExtra("JellySleeve", systemImage: "music.note", isInserted: Binding(
+            get: { menuBarIsInserted },
+            set: { _ in }
+        )) {
             Button(String(localized: "Open Overlay")) {
                 appDelegate.showOverlay()
             }
