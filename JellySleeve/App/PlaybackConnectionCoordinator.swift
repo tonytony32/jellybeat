@@ -190,6 +190,7 @@ final class PlaybackConnectionCoordinator {
             case .connected:
                 socketFailureStreak = 0
                 player.connectionMode = .webSocket
+                player.updateConnection(.connected)
                 if let poller {
                     Self.logger.notice("WebSocket up; pausing polling fallback.")
                     Task { await poller.stop() }
