@@ -51,7 +51,7 @@ private struct AeroBody: View {
 
         VStack(alignment: .leading, spacing: 8) {
             ArtworkView(
-                itemId: track.itemId,
+                itemId: track.artworkItemId,
                 imageTag: track.imageTag,
                 size: artworkSize,
                 cornerRadius: 14,

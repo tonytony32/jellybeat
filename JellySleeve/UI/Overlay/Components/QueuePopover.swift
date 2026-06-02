@@ -11,20 +11,70 @@ struct QueuePanelView: View {
     @Environment(PlayerStore.self) private var player
 
     var body: some View {
-        QueuePopover(queue: player.queue) { item in
-            player.isQueuePopoverOpen = false
-            Task { @MainActor in await player.playQueueItem(item) }
-        }
+        QueuePopover(
+            queue: player.queue,
+            instantMix: player.instantMix,
+            instantMixState: player.instantMixState,
+            seedId: player.currentTrack?.itemId,
+            isOpen: player.isQueuePopoverOpen,
+            onSelectQueue: { item in
+                player.isQueuePopoverOpen = false
+                Task { @MainActor in await player.playQueueItem(item) }
+            },
+            onSelectInstantMix: { item in
+                // Keep the panel open: playing from the mix lands the user on
+                // the Up Next tab (handled in QueuePopover) so they can watch
+                // the new queue with the picked track now playing at the top.
+                Task { @MainActor in await player.playInstantMixItem(item) }
+            },
+            onShowInstantMix: {
+                Task { @MainActor in await player.loadInstantMix() }
+            }
+        )
     }
 }
 
-/// The play-queue list ("Up Next") with the current track highlighted. Tapping
-/// a row jumps the client to that track (`onSelect`). Rendered inside the
-/// side-panel window managed by `OverlayWindowController`.
+/// Which list the queue panel is showing.
+enum QueueTab: Hashable {
+    case upNext
+    case instantMix
+}
+
+/// The queue panel: a segmented control toggling between the play queue
+/// ("Up Next", with the current track highlighted) and "Instant Mix"
+/// recommendations seeded from the current song. Tapping an Up Next row jumps
+/// the client to it; tapping an Instant Mix row replaces the queue with the mix
+/// and plays from there. Rendered inside the side-panel window managed by
+/// `OverlayWindowController`.
 struct QueuePopover: View {
     let queue: [QueueItem]
-    /// Invoked with the tapped queue entry so the client jumps to it.
-    let onSelect: (QueueItem) -> Void
+    let instantMix: [QueueItem]
+    let instantMixState: PlayerStore.InstantMixState
+    /// Current track id; drives a refetch when the song changes while the
+    /// Instant Mix tab is open.
+    let seedId: String?
+    /// Whether the panel is currently shown. The panel window is reused across
+    /// opens, so this resets the tab to "Up Next" each time it closes — the
+    /// panel always reopens on the queue, never lingering on Instant Mix.
+    let isOpen: Bool
+    /// Invoked with the tapped play-queue entry so the client jumps to it.
+    let onSelectQueue: (QueueItem) -> Void
+    /// Invoked with the tapped Instant Mix entry to play the mix from there.
+    let onSelectInstantMix: (QueueItem) -> Void
+    /// Asks the store to (lazily) load the Instant Mix for the current track.
+    let onShowInstantMix: () -> Void
+
+    /// The visible tab; defaults to the play queue so the panel opens showing
+    /// "what's next" and only fetches recommendations when asked.
+    @State private var tab: QueueTab = .upNext
+    /// Set when the user plays from Instant Mix: once the new queue arrives, the
+    /// Up Next list scrolls the now-playing track to the top so the upcoming mix
+    /// is in view. One-shot so normal track advances don't yank the list.
+    @State private var pendingScrollToTop = false
+    /// The track id picked from Instant Mix that we're waiting to start. We stay
+    /// on the Instant Mix tab until it becomes the current track (the new queue
+    /// has landed), then switch to Up Next — no flash of the stale queue.
+    @State private var pendingSwitchItemId: String?
 
     /// Beak direction + position, written by `OverlayWindowController` when it
     /// places the panel, so the tail points back at the overlay it opened from.
@@ -45,20 +95,61 @@ struct QueuePopover: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Up Next")
-                .font(.headline)
-                .padding(.horizontal, 14)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
-            Divider()
-            if queue.isEmpty {
-                emptyState
-            } else {
-                list
+            Picker("Queue view", selection: $tab) {
+                Text("Up Next").tag(QueueTab.upNext)
+                Text("Instant Mix").tag(QueueTab.instantMix)
             }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
+            Divider()
+            content
         }
         .frame(width: 300)
         .frame(maxHeight: 380)
+        // Switching tabs / loading the mix / a growing queue all change the
+        // content height; tell the controller to re-fit the panel window. Run
+        // from event handlers (never during the view update) so we don't mutate
+        // observable chrome mid-render.
+        .onChange(of: tab) { _, newTab in
+            if newTab == .instantMix { onShowInstantMix() }
+            chrome.contentRevision += 1
+        }
+        .onChange(of: seedId) { _, _ in
+            // A different track started while browsing the mix → refresh it.
+            // While we're waiting to land on a picked track, the switch is driven
+            // by the queue head (below), so don't reload the mix in that window.
+            if tab == .instantMix, pendingSwitchItemId == nil { onShowInstantMix() }
+        }
+        .onChange(of: queue.first?.itemId) { _, head in
+            // Switch to Up Next only once the picked track is the head of the
+            // queue AND is the current track — i.e. the reordered new queue has
+            // fully landed (Jellyfin sends the order a beat after the items, so
+            // switching earlier would flash a momentarily-unordered list).
+            guard let target = pendingSwitchItemId,
+                  head == target,
+                  queue.first?.isCurrent == true else { return }
+            pendingSwitchItemId = nil
+            pendingScrollToTop = true
+            tab = .upNext
+        }
+        .onChange(of: instantMixState) { _, _ in
+            if tab == .instantMix { chrome.contentRevision += 1 }
+        }
+        .onChange(of: queue.count) { _, _ in
+            if tab == .upNext { chrome.contentRevision += 1 }
+        }
+        // The panel window is reused, so its tab @State survives a close. Snap
+        // back to Up Next when it closes so it always reopens on the queue.
+        .onChange(of: isOpen) { _, open in
+            if !open {
+                tab = .upNext
+                pendingSwitchItemId = nil
+                pendingScrollToTop = false
+            }
+        }
         // Reserve the beak strip on the side facing the overlay so the header
         // and list never slide under the tail.
         .padding(chrome.beakEdge == .leading ? .leading : .trailing, QueuePanelBeak.width)
@@ -86,15 +177,100 @@ struct QueuePopover: View {
         )
     }
 
+    /// Body for the selected tab.
+    @ViewBuilder
+    private var content: some View {
+        switch tab {
+        case .upNext:
+            if queue.isEmpty {
+                emptyState
+            } else {
+                list(queue, onSelect: onSelectQueue)
+            }
+        case .instantMix:
+            instantMixContent
+        }
+    }
+
+    /// Instant Mix tab: spinner while loading, the recommendation list when
+    /// loaded, or empty / error placeholders.
+    @ViewBuilder
+    private var instantMixContent: some View {
+        switch instantMixState {
+        case .idle, .loading:
+            loadingState
+        case .loaded:
+            list(instantMix) { item in
+                // Stay on this tab and play; we switch to Up Next only once the
+                // picked track becomes current (see onChange(of: seedId)), so we
+                // never flash the stale queue.
+                pendingSwitchItemId = item.itemId
+                onSelectInstantMix(item)
+            }
+        case .empty:
+            instantMixEmptyState
+        case .failed:
+            instantMixErrorState
+        }
+    }
+
     private var emptyState: some View {
-        VStack(spacing: 6) {
-            Image(systemName: "music.note.list")
+        placeholder(
+            symbol: "music.note.list",
+            title: "Nothing up next",
+            detail: "The player isn't reporting a queue."
+        )
+    }
+
+    private var loadingState: some View {
+        VStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+            Text("Finding similar tracks…")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 28)
+        .padding(.horizontal, 16)
+    }
+
+    private var instantMixEmptyState: some View {
+        placeholder(
+            symbol: "wand.and.stars",
+            title: "No instant mix",
+            detail: "Jellyfin couldn't build a mix from this track."
+        )
+    }
+
+    private var instantMixErrorState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 22, weight: .light))
                 .foregroundStyle(.secondary)
-            Text("Nothing up next")
+            Text("Couldn't load instant mix")
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            Text("The player isn't reporting a queue.")
+            Button("Try again") { onShowInstantMix() }
+                .buttonStyle(.plain)
+                .font(.caption)
+                .foregroundStyle(.tint)
+                .focusEffectDisabled()
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
+        .padding(.horizontal, 16)
+    }
+
+    private func placeholder(symbol: String, title: String, detail: String) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: symbol)
+                .font(.system(size: 22, weight: .light))
+                .foregroundStyle(.secondary)
+            Text(title)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Text(detail)
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
@@ -104,25 +280,41 @@ struct QueuePopover: View {
         .padding(.horizontal, 16)
     }
 
-    private var list: some View {
-        ScrollViewReader { proxy in
+    private func list(
+        _ items: [QueueItem],
+        onSelect: @escaping (QueueItem) -> Void
+    ) -> some View {
+        let currentId = items.first(where: { $0.isCurrent })?.id
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(queue) { item in
+                    ForEach(items) { item in
                         QueueRow(item: item) { onSelect(item) }
                             .id(item.id)
-                        if item.id != queue.last?.id {
+                        if item.id != items.last?.id {
                             Divider().padding(.leading, 58)
                         }
                     }
                 }
             }
             .onAppear {
-                // Surface the current track so the user sees "what's next"
-                // without scrolling, even deep into a long queue.
-                if let current = queue.first(where: { $0.isCurrent }) {
-                    proxy.scrollTo(current.id, anchor: .center)
+                guard let currentId else { return }
+                // We switch to Up Next only after the new queue has landed, so on
+                // appear the picked track is already current — pin it to the top
+                // so the upcoming mix shows. Otherwise just surface the current
+                // track (centered) so the user sees "what's next" without scrolling.
+                if pendingScrollToTop {
+                    pendingScrollToTop = false
+                    proxy.scrollTo(currentId, anchor: .top)
+                } else {
+                    proxy.scrollTo(currentId, anchor: .center)
                 }
+            }
+            .onChange(of: currentId) { _, id in
+                // Backstop if the queue's current lands just after the tab switch.
+                guard pendingScrollToTop, let id else { return }
+                pendingScrollToTop = false
+                withAnimation { proxy.scrollTo(id, anchor: .top) }
             }
         }
     }
@@ -140,7 +332,7 @@ private struct QueueRow: View {
     var body: some View {
         Button(action: onSelect) {
             HStack(spacing: 10) {
-                QueueThumbnail(itemId: item.itemId, imageTag: item.imageTag)
+                QueueThumbnail(itemId: item.artworkItemId, imageTag: item.imageTag)
                     .frame(width: 36, height: 36)
                     .overlay {
                         // On hover over an upcoming row, hint that tapping plays
@@ -268,6 +460,11 @@ final class QueuePanelChrome {
     var beakEdge: QueuePanelBeakEdge = .leading
     /// Vertical center of the beak in panel-local points, measured from the top.
     var beakCenterFromTop: CGFloat = 60
+    /// Bumped by `QueuePopover` whenever its content height may have changed
+    /// (tab switch, Instant Mix list arriving, queue growing), so
+    /// `OverlayWindowController` re-fits and repositions the panel window around
+    /// the new size — the panel can't resize itself from inside SwiftUI.
+    var contentRevision: Int = 0
     /// Vertical center of the "Up Next" (queue) button, measured in points from
     /// the *top* of the overlay window. Published by `ControlsView` as it lays
     /// out so `OverlayWindowController` can aim the beak straight at the button

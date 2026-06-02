@@ -26,7 +26,12 @@ nonisolated enum ConnectionState: Equatable, Sendable {
 /// between the actor poller and the @MainActor PlayerStore freely.
 nonisolated struct TrackSnapshot: Equatable, Sendable {
     let itemId: String
+    /// Tag for the artwork named by `artworkItemId` (may be the album's tag).
     let imageTag: String?
+    /// The id to fetch the cover from — the track's own image if it has one,
+    /// else the parent album's. Distinct from `itemId` (used for playback /
+    /// favorites) because many tracks carry no cover of their own.
+    let artworkItemId: String
     let title: String
     let artist: String
     let album: String
@@ -46,6 +51,7 @@ nonisolated struct TrackSnapshot: Equatable, Sendable {
         TrackSnapshot(
             itemId: itemId,
             imageTag: imageTag,
+            artworkItemId: artworkItemId,
             title: title,
             artist: artist,
             album: album,
@@ -57,15 +63,16 @@ nonisolated struct TrackSnapshot: Equatable, Sendable {
     }
 }
 
-/// One row of the active client's play queue, materialised from a session's
-/// `NowPlayingQueueFullItems`. Read-only: Jellyfin exposes the queue but no
-/// "jump to this entry" session command, so the popover is a preview of what's
-/// playing and what's up next, with `isCurrent` marking the now-playing row.
+/// One row of a queue list (the play queue or an Instant Mix). Tapping a row
+/// jumps/plays via `itemId`; `isCurrent` marks the now-playing row.
 nonisolated struct QueueItem: Equatable, Sendable, Identifiable {
     /// Stable within one queue snapshot. Composed from the position + item id
     /// because the same track can legitimately appear twice in a queue.
     let id: String
     let itemId: String
+    /// The id to fetch the row's cover from — the track's own image if present,
+    /// else the parent album's (see `TrackSnapshot.artworkItemId`).
+    let artworkItemId: String
     let imageTag: String?
     let title: String
     let artist: String

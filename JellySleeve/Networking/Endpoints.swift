@@ -11,6 +11,13 @@ nonisolated enum Endpoints {
         "/Items/\(itemId)/Images/Primary"
     }
 
+    /// An "instant mix" seeded from an item: Jellyfin returns a list of similar
+    /// tracks (a `BaseItemDtoQueryResult`). Used by the queue panel's Instant
+    /// Mix tab to surface recommendations based on the current song.
+    static func itemInstantMix(itemId: String) -> String {
+        "/Items/\(itemId)/InstantMix"
+    }
+
     static func sessionPlayPause(sessionId: String) -> String {
         "/Sessions/\(sessionId)/Playing/PlayPause"
     }

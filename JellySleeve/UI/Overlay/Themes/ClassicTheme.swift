@@ -56,7 +56,7 @@ private struct ClassicBody: View {
         // cover, where it's invisible (Classic floats with no glass frame).
         HStack(alignment: .bottom, spacing: 12) {
             ArtworkView(
-                itemId: track.itemId,
+                itemId: track.artworkItemId,
                 imageTag: track.imageTag,
                 size: theme.layout.artworkSize ?? 120,
                 cornerRadius: 6,

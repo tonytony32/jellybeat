@@ -119,6 +119,36 @@ nonisolated struct JellyfinClient: Sendable {
         return data
     }
 
+    /// Fetch an "instant mix" seeded from `seedItemId`: a list of tracks the
+    /// server considers similar, scoped to the configured user. Returned items
+    /// share the `NowPlayingItem` shape (Id/Name/Artists/ImageTags/…), so the
+    /// queue panel can render them with the same row as the play queue.
+    func fetchInstantMix(seedItemId: String, limit: Int = 30) async throws -> [NowPlayingItem] {
+        var components = URLComponents()
+        components.path = Endpoints.itemInstantMix(itemId: seedItemId)
+        components.queryItems = [
+            URLQueryItem(name: "userId", value: configuration.userId),
+            URLQueryItem(name: "limit", value: "\(limit)"),
+        ]
+        guard let relative = components.url,
+              let absolute = URL(string: relative.relativeString, relativeTo: configuration.baseURL)?.absoluteURL
+        else {
+            throw NetworkError.invalidURL
+        }
+        var request = URLRequest(url: absolute)
+        request.httpMethod = "GET"
+        request.setValue(configuration.apiKey, forHTTPHeaderField: "X-Emby-Token")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await send(request, on: controlSession)
+        try validate(response)
+        do {
+            return try Self.makeDecoder().decode(InstantMixEnvelope.self, from: data).items
+        } catch {
+            Self.logger.error("Decoding instant mix failed: \(String(describing: error), privacy: .public)")
+            throw NetworkError.decodingFailed(String(describing: error))
+        }
+    }
+
     func playPause(sessionId: String) async throws {
         try await postNoContent(Endpoints.sessionPlayPause(sessionId: sessionId))
     }
@@ -236,6 +266,15 @@ nonisolated struct JellyfinClient: Sendable {
         enum CodingKeys: String, CodingKey {
             case name = "Name"
             case arguments = "Arguments"
+        }
+    }
+
+    /// Decode target for an instant-mix query: a Jellyfin
+    /// `BaseItemDtoQueryResult`, of which we only read the `Items` array.
+    private struct InstantMixEnvelope: Decodable, Sendable {
+        let items: [NowPlayingItem]
+        enum CodingKeys: String, CodingKey {
+            case items = "Items"
         }
     }
 

@@ -51,7 +51,7 @@ private struct StandardBody: View {
     var body: some View {
         VStack(spacing: 10) {
             ArtworkView(
-                itemId: track.itemId,
+                itemId: track.artworkItemId,
                 imageTag: track.imageTag,
                 size: theme.layout.artworkSize ?? 256,
                 cornerRadius: 8,

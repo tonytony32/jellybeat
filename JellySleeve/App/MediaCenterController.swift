@@ -151,13 +151,13 @@ final class MediaCenterController {
     // MARK: - Artwork sync
 
     private func ensureArtwork(for track: TrackSnapshot) {
-        let key = "\(track.itemId)_\(track.imageTag ?? "none")"
+        let key = "\(track.artworkItemId)_\(track.imageTag ?? "none")"
         guard key != lastAppliedArtworkKey else { return }
         lastAppliedArtworkKey = key
         guard let cache = artworkProvider.cache else { return }
 
         Task { [weak self, key] in
-            guard let data = await cache.data(forItemId: track.itemId, tag: track.imageTag),
+            guard let data = await cache.data(forItemId: track.artworkItemId, tag: track.imageTag),
                   let image = NSImage(data: data) else { return }
             let artwork = Self.makeArtwork(image: image)
             await MainActor.run { [weak self] in

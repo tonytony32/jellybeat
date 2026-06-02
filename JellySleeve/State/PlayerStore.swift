@@ -23,6 +23,18 @@ final class PlayerStore {
         case polling
     }
 
+    /// Lifecycle of the Instant Mix list shown in the queue panel's second tab.
+    /// Drives the tab's spinner / empty / error states. The mix is fetched
+    /// lazily (only when the user opens that tab) and rebuilt when the seed
+    /// track changes.
+    enum InstantMixState: Equatable, Sendable {
+        case idle      // not requested for the current track yet
+        case loading
+        case loaded    // `instantMix` holds recommendations
+        case empty     // the server returned no similar tracks
+        case failed
+    }
+
     var connectionState: ConnectionState = .idle
     var connectionMode: ConnectionMode = .unknown
     var currentTrack: TrackSnapshot? = nil
@@ -32,6 +44,19 @@ final class PlayerStore {
     /// the controls' queue popover. Empty when the playing client doesn't
     /// report one. Cleared alongside `currentTrack` when playback stops.
     var queue: [QueueItem] = []
+
+    /// Recommendations seeded from the current track ("Instant Mix"), surfaced
+    /// in the queue panel's second tab. Fetched lazily and rebuilt when the
+    /// track changes. Tapping a row replaces the play queue with this mix.
+    var instantMix: [QueueItem] = []
+
+    /// Loading lifecycle of `instantMix`, read by the panel to show a spinner /
+    /// empty / error state.
+    var instantMixState: InstantMixState = .idle
+
+    /// The track id the current `instantMix` was seeded from, so we can reuse a
+    /// cached mix while the same song plays and refetch when it changes.
+    private var instantMixSeedId: String?
 
     /// Output volume (0...100) of the active client, as last reported by the
     /// poll or set optimistically via `nudgeVolume`. Drives the scroll-to-
@@ -201,7 +226,12 @@ final class PlayerStore {
             anticipating = false
             anticipatingTask?.cancel()
             if self.queue != queue { self.queue = queue }
-            if isNewItem { refreshFavorite(for: track.itemId) }
+            if isNewItem {
+                // The mix was seeded from the previous song; drop it so the
+                // panel rebuilds recommendations for the new track on demand.
+                resetInstantMix()
+                refreshFavorite(for: track.itemId)
+            }
         } else if currentTrack != nil {
             clearTrackTask?.cancel()
             clearTrackTask = Task { @MainActor [weak self] in
@@ -209,6 +239,7 @@ final class PlayerStore {
                 guard !Task.isCancelled else { return }
                 self?.currentTrack = nil
                 self?.queue = []
+                self?.resetInstantMix()
             }
         }
 
@@ -234,6 +265,7 @@ final class PlayerStore {
             currentTrack = nil
             isPaused = false
             queue = []
+            resetInstantMix()
         }
     }
 
@@ -337,9 +369,11 @@ final class PlayerStore {
         let artist = artistLabel(for: item)
         let runtimeSeconds = Double(item.runTimeTicks ?? 0) / 10_000_000
         let positionSeconds = Double(session.playState?.positionTicks ?? 0) / 10_000_000
+        let art = item.artworkSource
         return TrackSnapshot(
             itemId: item.id,
-            imageTag: item.imageTags?.primary,
+            imageTag: art.tag,
+            artworkItemId: art.itemId,
             title: item.name,
             artist: artist,
             album: item.album ?? "",
@@ -357,15 +391,46 @@ final class PlayerStore {
         guard let items = session.nowPlayingQueueFullItems, !items.isEmpty else {
             return []
         }
-        let currentId = session.nowPlayingItem?.id
-        return items.enumerated().map { index, item in
-            let artist = artistLabel(for: item)
+        return makeQueueItems(
+            from: orderedQueueItems(full: items, order: session.nowPlayingQueue),
+            currentId: session.nowPlayingItem?.id
+        )
+    }
+
+    /// Reorder the (often unordered) `NowPlayingQueueFullItems` into the play
+    /// order given by `NowPlayingQueue`. The server expands the full-items list
+    /// via a lookup that doesn't preserve queue order, so without this the
+    /// "Up Next" list shows tracks scrambled relative to the client. Falls back
+    /// to the raw order when `NowPlayingQueue` is absent or doesn't line up.
+    private static func orderedQueueItems(
+        full items: [NowPlayingItem],
+        order: [NowPlayingQueueEntry]?
+    ) -> [NowPlayingItem] {
+        guard let order, !order.isEmpty else { return items }
+        // First occurrence wins so duplicate ids resolve to the same metadata.
+        let byId = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let reordered = order.compactMap { byId[$0.id] }
+        // If the order list didn't map cleanly (id mismatch), keep the raw list
+        // rather than dropping rows.
+        return reordered.count == items.count ? reordered : items
+    }
+
+    /// Map raw `NowPlayingItem`s to `QueueItem` rows, flagging the one matching
+    /// `currentId` as the now-playing entry. Shared by the play-queue preview
+    /// and the Instant Mix list so both render with the same row.
+    private static func makeQueueItems(
+        from items: [NowPlayingItem],
+        currentId: String?
+    ) -> [QueueItem] {
+        items.enumerated().map { index, item in
+            let art = item.artworkSource
             return QueueItem(
                 id: "\(index)::\(item.id)",
                 itemId: item.id,
-                imageTag: item.imageTags?.primary,
+                artworkItemId: art.itemId,
+                imageTag: art.tag,
                 title: item.name,
-                artist: artist,
+                artist: artistLabel(for: item),
                 isCurrent: item.id == currentId
             )
         }
@@ -464,6 +529,62 @@ final class PlayerStore {
         }
     }
 
+    /// Lazily fetch the Instant Mix seeded from the current track. Idempotent:
+    /// reuses a mix already loaded (or in flight) for the same song, so the
+    /// panel can call this freely on tab-open and track-change. Guards against
+    /// the track changing mid-flight so a slow response can't overwrite a newer
+    /// seed's mix.
+    func loadInstantMix() async {
+        guard let client else { return }
+        guard let seed = currentTrack?.itemId else {
+            resetInstantMix()
+            return
+        }
+        // Reuse a fresh (or already loading) mix for this track.
+        if instantMixSeedId == seed,
+           instantMixState == .loaded || instantMixState == .loading {
+            return
+        }
+        instantMixSeedId = seed
+        instantMixState = .loading
+        instantMix = []
+        do {
+            let items = try await client.fetchInstantMix(seedItemId: seed)
+            guard instantMixSeedId == seed else { return }  // track changed mid-flight
+            instantMix = Self.makeQueueItems(from: items, currentId: currentTrack?.itemId)
+            instantMixState = instantMix.isEmpty ? .empty : .loaded
+            Self.logger.notice("Instant mix loaded: \(self.instantMix.count, privacy: .public) tracks")
+        } catch {
+            guard instantMixSeedId == seed else { return }
+            Self.logger.error("Instant mix load failed: \(String(describing: error), privacy: .public)")
+            instantMixState = .failed
+        }
+    }
+
+    /// Start playback from a tapped Instant Mix row: make the tapped track the
+    /// head of a new queue, followed by the mix entries *after* it — the ones
+    /// before it in the recommendation list are dropped. So the new "Up Next"
+    /// reads as [tapped, then the rest of the mix], with the tapped song first,
+    /// rather than keeping earlier recommendations ahead of the playhead.
+    /// (The play queue differs here from `playQueueItem`, which preserves the
+    /// whole existing queue and only moves the playhead.)
+    func playInstantMixItem(_ item: QueueItem) async {
+        guard isLinkLive else { showTransient(unreachableHint); return }
+        guard let startIndex = instantMix.firstIndex(where: { $0.id == item.id }) else { return }
+        let itemIds = instantMix[startIndex...].map(\.itemId)
+        await sendCommand(name: "play instant mix item") { client, sessionId in
+            try await client.play(sessionId: sessionId, itemIds: itemIds, startIndex: 0)
+        }
+    }
+
+    /// Drop any loaded Instant Mix so it's rebuilt for the next track. Called on
+    /// track change and when playback stops.
+    private func resetInstantMix() {
+        instantMixSeedId = nil
+        instantMix = []
+        instantMixState = .idle
+    }
+
     /// Seek the currently playing track to an absolute `seconds` value.
     /// Updates the local snapshot optimistically so the progress bar moves
     /// before the WebSocket pushes the new state back from the server.
@@ -478,6 +599,7 @@ final class PlayerStore {
         currentTrack = TrackSnapshot(
             itemId: current.itemId,
             imageTag: current.imageTag,
+            artworkItemId: current.artworkItemId,
             title: current.title,
             artist: current.artist,
             album: current.album,

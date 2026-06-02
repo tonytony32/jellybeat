@@ -30,10 +30,13 @@ struct PlayerStoreTests {
                 album: "Album",
                 runTimeTicks: 1_800_000_000,
                 imageTags: nil,
+                albumId: nil,
+                albumPrimaryImageTag: nil,
                 userData: nil
             ),
             playState: PlayState(positionTicks: 0, isPaused: isPaused, volumeLevel: 80),
-            nowPlayingQueueFullItems: nil
+            nowPlayingQueueFullItems: nil,
+            nowPlayingQueue: nil
         )
     }
 
@@ -95,7 +98,8 @@ struct PlayerStoreTests {
         func item(_ id: String, _ name: String) -> NowPlayingItem {
             NowPlayingItem(
                 id: id, name: name, artists: ["Artist"], albumArtist: "Artist",
-                album: "Album", runTimeTicks: 1_800_000_000, imageTags: nil, userData: nil
+                album: "Album", runTimeTicks: 1_800_000_000, imageTags: nil,
+                albumId: nil, albumPrimaryImageTag: nil, userData: nil
             )
         }
         let queueItems = [item("a", "First"), item("b", "Current"), item("c", "Next")]
@@ -104,7 +108,8 @@ struct PlayerStoreTests {
             deviceName: "Test", lastActivityDate: Date(),
             nowPlayingItem: item("b", "Current"),
             playState: PlayState(positionTicks: 0, isPaused: false, volumeLevel: 80),
-            nowPlayingQueueFullItems: queueItems
+            nowPlayingQueueFullItems: queueItems,
+            nowPlayingQueue: nil
         )
         let store = PlayerStore()
         store.ingest(sessions: [session], userId: Self.userId)
@@ -124,6 +129,61 @@ struct PlayerStoreTests {
         #expect(store.queue.isEmpty)
     }
 
+    /// `NowPlayingQueueFullItems` is not guaranteed to be in play order (the
+    /// server expands it via a lookup that loses order). When `NowPlayingQueue`
+    /// is present, the surfaced queue must follow ITS order, not the full-items
+    /// order — otherwise "Up Next" shows tracks scrambled vs. the client.
+    @Test
+    func ingestOrdersQueueByNowPlayingQueue() {
+        func item(_ id: String, _ name: String) -> NowPlayingItem {
+            NowPlayingItem(
+                id: id, name: name, artists: ["Artist"], albumArtist: "Artist",
+                album: "Album", runTimeTicks: 1_800_000_000, imageTags: nil,
+                albumId: nil, albumPrimaryImageTag: nil, userData: nil
+            )
+        }
+        // Full items arrive scrambled; NowPlayingQueue carries the real order.
+        let full = [item("c", "Third"), item("a", "First"), item("b", "Second")]
+        let order = [
+            NowPlayingQueueEntry(id: "a", playlistItemId: "0"),
+            NowPlayingQueueEntry(id: "b", playlistItemId: "1"),
+            NowPlayingQueueEntry(id: "c", playlistItemId: "2"),
+        ]
+        let session = Session(
+            id: "s1", userId: Self.userId, client: "Jellyfin Web",
+            deviceName: "Test", lastActivityDate: Date(),
+            nowPlayingItem: item("a", "First"),
+            playState: PlayState(positionTicks: 0, isPaused: false, volumeLevel: 80),
+            nowPlayingQueueFullItems: full, nowPlayingQueue: order
+        )
+        let store = PlayerStore()
+        store.ingest(sessions: [session], userId: Self.userId)
+
+        #expect(store.queue.map(\.title) == ["First", "Second", "Third"])
+        #expect(store.queue.first?.isCurrent == true)
+    }
+
+    /// An audio track with no cover of its own resolves its artwork to the
+    /// parent album's image; one with its own cover keeps it.
+    @Test
+    func artworkFallsBackToAlbumWhenTrackHasNoOwnCover() {
+        func make(ownTag: String?) -> NowPlayingItem {
+            NowPlayingItem(
+                id: "track", name: "n", artists: nil, albumArtist: nil,
+                album: nil, runTimeTicks: nil,
+                imageTags: ownTag.map { .init(primary: $0) },
+                albumId: "album", albumPrimaryImageTag: "albumtag", userData: nil
+            )
+        }
+        let own = make(ownTag: "owntag").artworkSource
+        #expect(own.itemId == "track")
+        #expect(own.tag == "owntag")
+
+        let fallback = make(ownTag: nil).artworkSource
+        #expect(fallback.itemId == "album")
+        #expect(fallback.tag == "albumtag")
+    }
+
     // MARK: - Artist resolution
 
     private func sessionWithArtists(
@@ -138,6 +198,8 @@ struct PlayerStoreTests {
             album: "Album",
             runTimeTicks: 1_800_000_000,
             imageTags: nil,
+            albumId: nil,
+            albumPrimaryImageTag: nil,
             userData: nil
         )
         return Session(
@@ -148,7 +210,8 @@ struct PlayerStoreTests {
             lastActivityDate: Date(),
             nowPlayingItem: item,
             playState: PlayState(positionTicks: 0, isPaused: false, volumeLevel: 80),
-            nowPlayingQueueFullItems: [item]
+            nowPlayingQueueFullItems: [item],
+            nowPlayingQueue: nil
         )
     }
 
