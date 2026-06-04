@@ -157,6 +157,7 @@ final class PlaybackConnectionCoordinator {
     func stop() {
         let oldPoller = poller
         let oldSocket = socketClient
+        let oldClient = currentClient
         poller = nil
         socketClient = nil
         currentClient = nil
@@ -170,9 +171,14 @@ final class PlaybackConnectionCoordinator {
         if let oldPoller {
             Task { await oldPoller.stop() }
         }
+        // Discard the socket *and* free its URLSession/delegate (a new stack is
+        // built in `start()`). `invalidate` supersedes `stop` here.
         if let oldSocket {
-            Task { await oldSocket.stop() }
+            Task { await oldSocket.invalidate() }
         }
+        // Same for the REST client's two sessions — the cache shared this
+        // client, but it's been detached above, so nothing reuses them.
+        oldClient?.invalidate()
     }
 
     // MARK: - WebSocket ⇄ polling orchestration

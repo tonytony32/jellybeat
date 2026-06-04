@@ -85,8 +85,7 @@ final class PhoneCallMonitor {
     private func handleCallStarted(source: String) {
         guard !player.isPaused, player.currentTrack != nil else { return }
         Self.logger.notice("Call signal received (\(source, privacy: .public)) — pausing playback.")
-        Task { @MainActor [weak self] in
-            await self?.player.playPause()
-        }
+        // Already on the main actor; the Task only bridges to the async command.
+        Task { [player] in await player.playPause() }
     }
 }

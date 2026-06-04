@@ -39,9 +39,10 @@ actor ArtworkCache {
         )
     }
 
-    /// Return JPEG bytes for the requested artwork, fetching them if needed.
-    /// Returns nil only when both the cache and the network fail; the UI
-    /// falls back to a placeholder in that case.
+    /// Return PNG bytes for the requested artwork, fetching them if needed.
+    /// (PNG, not JPEG: `fetchArtwork` requests `format=Png` to avoid ringing
+    /// artefacts around lettering.) Returns nil only when both the cache and the
+    /// network fail; the UI falls back to a placeholder in that case.
     func data(forItemId itemId: String, tag: String?) async -> Data? {
         let key = Self.cacheKey(itemId: itemId, tag: tag)
 
