@@ -157,6 +157,16 @@ actor JellyfinSocketClient {
         heartbeatTask = nil
     }
 
+    /// Terminal teardown: stop the connection and break the
+    /// `URLSession → delegate` retain cycle so the session (and, in self-signed
+    /// mode, its `TrustingURLSessionDelegate`) deallocates. Unlike `stop()`, the
+    /// socket can't be restarted afterwards; the owner only calls this when it
+    /// is discarding this instance (a reconfigure), never on pause/resume.
+    func invalidate() {
+        stop()
+        session.finishTasksAndInvalidate()
+    }
+
     // MARK: - Loops
 
     private func startLoops() {

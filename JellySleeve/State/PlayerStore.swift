@@ -469,6 +469,11 @@ final class PlayerStore {
         // Don't fire a doomed command (and the raw-error toast that follows)
         // when the link is down — tell the user why nothing happened instead.
         guard isLinkLive else { showTransient(unreachableHint); return }
+        // Drop presses landing inside the 300 ms cooldown *before* the optimistic
+        // flip below. Otherwise a double-tap toggles the icon a second time while
+        // `sendCommand` no-ops, leaving the overlay showing the opposite of what
+        // the server will do until the optimistic window expires and a poll heals it.
+        guard !isCommandInFlight else { return }
         // Optimistic UI: flip the icon at the press so latency is hidden.
         // The server's eventual confirmation through the poll either ratifies
         // (no visible change) or, if the command failed silently somewhere,
@@ -501,6 +506,9 @@ final class PlayerStore {
 
     func nextTrack() async {
         guard isLinkLive else { showTransient(unreachableHint); return }
+        // Match playPause: ignore presses inside the cooldown so the feedback
+        // flash doesn't fire for a command that sendCommand will drop.
+        guard !isCommandInFlight else { return }
         flashFeedback(.next)
         await sendCommand(name: "next") { client, sessionId in
             try await client.nextTrack(sessionId: sessionId)
@@ -509,6 +517,7 @@ final class PlayerStore {
 
     func previousTrack() async {
         guard isLinkLive else { showTransient(unreachableHint); return }
+        guard !isCommandInFlight else { return }
         flashFeedback(.previous)
         await sendCommand(name: "previous") { client, sessionId in
             try await client.previousTrack(sessionId: sessionId)

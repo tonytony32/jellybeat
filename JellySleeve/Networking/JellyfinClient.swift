@@ -74,6 +74,17 @@ nonisolated struct JellyfinClient: Sendable {
 
     // MARK: - Public API
 
+    /// Break the `URLSession → delegate` retain cycle when this client is being
+    /// discarded (a reconfigure or teardown). `URLSession` holds its delegate
+    /// strongly until invalidated, so in self-signed mode (where a
+    /// `TrustingURLSessionDelegate` is attached) the sessions and their delegate
+    /// would otherwise live forever — one extra leak per server-settings edit.
+    /// Uses `finishTasksAndInvalidate` so any in-flight request still completes.
+    func invalidate() {
+        pollingSession.finishTasksAndInvalidate()
+        controlSession.finishTasksAndInvalidate()
+    }
+
     func validateConnection() async throws -> ServerInfo {
         try await get(Endpoints.systemInfo, session: controlSession)
     }

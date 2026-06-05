@@ -29,7 +29,10 @@ actor PlaybackPoller {
 
     /// When true, the loop skips its sleep and polls immediately.
     private var refreshRequested: Bool = false
-    private var refreshContinuation: CheckedContinuation<Void, Never>?
+    /// The in-flight inter-tick sleep. `forceRefresh` cancels it to wake the
+    /// loop early; held so we never leave a stale timer running that could cut
+    /// short a *later* tick (the bug the previous continuation dance had).
+    private var sleepTask: Task<Void, Never>?
 
     private var consecutiveFailures: Int = 0
 
@@ -56,11 +59,11 @@ actor PlaybackPoller {
     private func stopInternal() {
         task?.cancel()
         task = nil
-        // Unblock any awaiters so the task can exit cleanly.
+        // Wake an in-flight sleep and any paused awaiter so the loop exits.
+        sleepTask?.cancel()
+        sleepTask = nil
         resumeContinuation?.resume()
         resumeContinuation = nil
-        refreshContinuation?.resume()
-        refreshContinuation = nil
     }
 
     func pause() {
@@ -81,8 +84,11 @@ actor PlaybackPoller {
     /// for the next interval.
     func forceRefresh() {
         refreshRequested = true
-        refreshContinuation?.resume()
-        refreshContinuation = nil
+        // Cancel the timer rather than juggling a continuation. The loop is
+        // suspended on `sleepTask.value`; cancelling makes that return, so the
+        // next iteration ticks immediately. Because the timer is owned (and
+        // nilled after each sleep), no stale timer survives to wake a later one.
+        sleepTask?.cancel()
     }
 
     // MARK: - Loop
@@ -171,26 +177,23 @@ actor PlaybackPoller {
         }
     }
 
+    /// Sleep until the next tick, or wake early when `forceRefresh` cancels the
+    /// timer. Runs on the actor, so cancelling `sleepTask` from `forceRefresh`
+    /// is race-free: the `Task.sleep` throws, `timer.value` returns, and the
+    /// loop resumes — with no leftover timer to disturb a later tick.
     private func sleepBeforeNextTick(baseDelay: TimeInterval) async {
-        // Wait the configured delay OR until something asks for an early refresh.
-        let nanos = UInt64(max(baseDelay, 0.1) * 1_000_000_000)
-        let waitTask = Task { try? await Task.sleep(nanoseconds: nanos) }
-        await withCheckedContinuation { continuation in
-            refreshContinuation = continuation
-            Task {
-                await waitTask.value
-                if refreshContinuation != nil {
-                    refreshContinuation?.resume()
-                    refreshContinuation = nil
-                }
-            }
-            // If a refresh was requested before we set the continuation, fire now.
-            if refreshRequested {
-                refreshRequested = false
-                refreshContinuation?.resume()
-                refreshContinuation = nil
-            }
+        // A refresh requested while we were ticking skips the sleep entirely.
+        if refreshRequested {
+            refreshRequested = false
+            return
         }
+        let nanos = UInt64(max(baseDelay, 0.1) * 1_000_000_000)
+        let timer = Task { () -> Void in
+            try? await Task.sleep(nanoseconds: nanos)
+        }
+        sleepTask = timer
+        await timer.value
+        sleepTask = nil
         refreshRequested = false
     }
 
