@@ -7,10 +7,15 @@ import ServiceManagement
 ///
 /// Storage strategy:
 ///  - Plain settings (`baseURLString`, `userId`, `allowSelfSigned`,
-///    `refreshRate`, `storeApiKeyInUserDefaults`) live in `UserDefaults`.
-///  - The API key location is governed by `storeApiKeyInUserDefaults`:
-///     * `false` (default) → Keychain via `KeychainHelper` (encrypted at rest).
-///     * `true`  → `UserDefaults` plaintext (user-elected; less secure).
+///    `refreshRate`, `storeApiKeyInKeychain`) live in `UserDefaults`.
+///  - The API key location is governed by `storeApiKeyInKeychain`:
+///     * `false` (default) → `UserDefaults`, alongside every other setting.
+///        This is the default because the macOS Keychain re-prompts for
+///        access whenever the app binary's signature changes (every local
+///        debug build, and sometimes after app updates), which is a constant
+///        nuisance for the common case.
+///     * `true`  → Keychain via `KeychainHelper` (encrypted at rest;
+///        user-elected for stronger privacy).
 ///
 /// SwiftUI views read this with `@Environment(SettingsStore.self)` and bind
 /// to its fields via `@Bindable`. Mutations are persisted synchronously in
@@ -92,19 +97,21 @@ final class SettingsStore {
         }
     }
 
-    /// When true the API key is persisted in UserDefaults (cleartext plist)
-    /// instead of the Keychain. Default is false (Keychain). Flipping it
-    /// migrates the current value between locations atomically.
-    var storeApiKeyInUserDefaults: Bool {
+    /// When true the API key is persisted in the macOS Keychain (encrypted at
+    /// rest). Default is false → the key lives in UserDefaults alongside the
+    /// other settings, which avoids the repeated Keychain authorization
+    /// prompts that re-signed (dev) builds trigger. Flipping it migrates the
+    /// current value between locations atomically.
+    var storeApiKeyInKeychain: Bool {
         didSet {
-            UserDefaults.standard.set(storeApiKeyInUserDefaults, forKey: Keys.storeApiKeyInUserDefaults)
-            if oldValue != storeApiKeyInUserDefaults {
+            UserDefaults.standard.set(storeApiKeyInKeychain, forKey: Keys.storeApiKeyInKeychain)
+            if oldValue != storeApiKeyInKeychain {
                 persistAPIKey()
             }
         }
     }
 
-    // MARK: Sensitive (Keychain or UserDefaults depending on `storeApiKeyInUserDefaults`)
+    // MARK: Sensitive (UserDefaults or Keychain depending on `storeApiKeyInKeychain`)
 
     var apiKey: String {
         didSet {
@@ -165,71 +172,49 @@ final class SettingsStore {
         self.windowOpacity = storedOpacity == 0 ? 1.0 : storedOpacity
         // Decide the storage location for the API key.
         //
-        // New default (this version onwards): Keychain.
-        // Old default (pre-this-version): UserDefaults (old toggle `useKeychain` == false).
+        // New default (this version onwards): UserDefaults, alongside every
+        // other setting. This avoids the macOS Keychain authorization prompt
+        // that fires whenever the app binary is re-signed (every local debug
+        // build, and sometimes after app updates). `storeApiKeyInKeychain`
+        // opts back into encrypted-at-rest Keychain storage.
         //
-        // Migration rules (idempotent):
-        //   1. New toggle (`storeApiKeyInUserDefaults`) already stored → use it directly.
-        //   2. Old toggle (`useKeychain`) stored, was false → key is in UserDefaults
-        //      → migrate to Keychain, set new toggle to false (default).
-        //   3. Old toggle stored, was true → key is already in Keychain → correct.
-        //   4. Neither toggle → check for stray key in UserDefaults, migrate if found.
-        let newToggleStored = defaults.object(forKey: Keys.storeApiKeyInUserDefaults) != nil
-
-        if newToggleStored {
-            let storeInUD = defaults.bool(forKey: Keys.storeApiKeyInUserDefaults)
-            self.storeApiKeyInUserDefaults = storeInUD
-            self.apiKey = storeInUD
-                ? (defaults.string(forKey: Keys.apiKey) ?? "")
-                : (KeychainHelper.load() ?? "")
-        } else if defaults.object(forKey: Keys.useKeychain) != nil {
-            let oldUseKeychain = defaults.bool(forKey: Keys.useKeychain)
-            defaults.removeObject(forKey: Keys.useKeychain)
-            if oldUseKeychain {
-                // Was already using Keychain — desired default, nothing to migrate.
-                self.storeApiKeyInUserDefaults = false
-                self.apiKey = KeychainHelper.load() ?? ""
-            } else {
-                // Was using UserDefaults — migrate key to Keychain.
-                let plain = defaults.string(forKey: Keys.apiKey) ?? ""
-                self.storeApiKeyInUserDefaults = false
-                self.apiKey = plain
-                if !plain.isEmpty {
-                    Self.logger.notice("Migrated API key from UserDefaults to Keychain")
-                    do {
-                        try KeychainHelper.save(apiKey: plain)
-                    } catch {
-                        Self.logger.error("Migration to Keychain failed: \(String(describing: error), privacy: .public)")
-                    }
-                    defaults.removeObject(forKey: Keys.apiKey)
-                }
-            }
-            defaults.set(false, forKey: Keys.storeApiKeyInUserDefaults)
+        // Migration (idempotent): once the new toggle key
+        // (`storeApiKeyInKeychain`) exists we honor it verbatim. On the first
+        // launch of this version it is absent, so we collapse whatever prior
+        // installs left behind — key in Keychain (the old default), key in
+        // UserDefaults, or the legacy `useKeychain` / `storeApiKeyInUserDefaults`
+        // toggles — into the new UserDefaults default. The key is read from
+        // wherever it lived and rewritten to UserDefaults; the Keychain entry
+        // and legacy toggles are cleared.
+        if defaults.object(forKey: Keys.storeApiKeyInKeychain) != nil {
+            let inKeychain = defaults.bool(forKey: Keys.storeApiKeyInKeychain)
+            self.storeApiKeyInKeychain = inKeychain
+            self.apiKey = inKeychain
+                ? (KeychainHelper.load() ?? "")
+                : (defaults.string(forKey: Keys.apiKey) ?? "")
         } else {
-            // Fresh install or unknown prior state.
-            let plain = defaults.string(forKey: Keys.apiKey)
-            let keychainValue = KeychainHelper.load()
-            self.storeApiKeyInUserDefaults = false
-            if let plain, !plain.isEmpty, (keychainValue == nil || keychainValue!.isEmpty) {
-                Self.logger.notice("Migrated API key from UserDefaults to Keychain")
-                self.apiKey = plain
-                do {
-                    try KeychainHelper.save(apiKey: plain)
-                } catch {
-                    Self.logger.error("Migration to Keychain failed: \(String(describing: error), privacy: .public)")
-                }
+            // First launch on this version — migrate to the UserDefaults default.
+            let plain = defaults.string(forKey: Keys.apiKey) ?? ""
+            let migrated = plain.isEmpty ? (KeychainHelper.load() ?? "") : plain
+            self.storeApiKeyInKeychain = false
+            self.apiKey = migrated
+            if migrated.isEmpty {
                 defaults.removeObject(forKey: Keys.apiKey)
             } else {
-                self.apiKey = keychainValue ?? ""
+                defaults.set(migrated, forKey: Keys.apiKey)
+                Self.logger.notice("Migrated API key to UserDefaults (default storage)")
             }
-            defaults.set(false, forKey: Keys.storeApiKeyInUserDefaults)
+            try? KeychainHelper.delete()
+            defaults.removeObject(forKey: Keys.useKeychain)
+            defaults.removeObject(forKey: Keys.storeApiKeyInUserDefaults)
+            defaults.set(false, forKey: Keys.storeApiKeyInKeychain)
         }
     }
 
     // MARK: Persistence helpers
 
     /// Persist the current `apiKey` value at the location dictated by
-    /// `storeApiKeyInUserDefaults` and clear the other location.
+    /// `storeApiKeyInKeychain` and clear the other location.
     /// Empty keys are treated as "delete from both".
     private func persistAPIKey() {
         let defaults = UserDefaults.standard
@@ -238,16 +223,16 @@ final class SettingsStore {
             defaults.removeObject(forKey: Keys.apiKey)
             return
         }
-        if storeApiKeyInUserDefaults {
-            defaults.set(apiKey, forKey: Keys.apiKey)
-            try? KeychainHelper.delete()
-        } else {
+        if storeApiKeyInKeychain {
             do {
                 try KeychainHelper.save(apiKey: apiKey)
             } catch {
                 Self.logger.error("Failed to persist API key to Keychain: \(String(describing: error), privacy: .public)")
             }
             defaults.removeObject(forKey: Keys.apiKey)
+        } else {
+            defaults.set(apiKey, forKey: Keys.apiKey)
+            try? KeychainHelper.delete()
         }
     }
 
@@ -257,11 +242,14 @@ final class SettingsStore {
         static let userId = "settings.userId"
         static let allowSelfSigned = "settings.allowSelfSigned"
         static let refreshRate = "settings.refreshRate"
-        /// New toggle key (default false = Keychain).
+        /// Toggle key (default false = UserDefaults; true = Keychain).
+        static let storeApiKeyInKeychain = "settings.storeApiKeyInKeychain"
+        /// Legacy toggle (default false = Keychain) — read only during the
+        /// one-time migration to `storeApiKeyInKeychain`.
         static let storeApiKeyInUserDefaults = "settings.storeApiKeyInUserDefaults"
-        /// Legacy key — read only during one-time migration from pre-v0.2 installs.
+        /// Even older legacy toggle — read only during one-time migration.
         static let useKeychain = "settings.useKeychain"
-        /// UserDefaults slot for the API key when `storeApiKeyInUserDefaults == true`.
+        /// UserDefaults slot for the API key when `storeApiKeyInKeychain == false`.
         static let apiKey = "settings.apiKey"
         static let windowLevel = "settings.windowLevel"
         static let windowOpacity = "settings.windowOpacity"
