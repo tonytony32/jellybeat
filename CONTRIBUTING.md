@@ -7,7 +7,7 @@ expectations:
 - No SLA on issue triage or PR review. I look at the queue when I have
   the bandwidth.
 - No CLA. By submitting a PR you agree it can ship under the project's
-  MIT licence.
+  AGPL-3.0 licence.
 - Scope is fixed by [`docs/PLAN.md`](docs/PLAN.md). Features that
   contradict the plan's no-goals (multi-server support, local audio
   playback, scrobble from the client, iCloud sync, Mac App Store

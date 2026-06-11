@@ -24,7 +24,7 @@ Internal notes — not promises to the community.
      (no-goals) and the architectural decisions in §2-§5
   4. The diff is reasonably small / focused
 - No CLA. By submitting, the contributor agrees their work ships under
-  the project's MIT licence.
+  the project's AGPL-3.0 licence.
 
 ## Releases
 

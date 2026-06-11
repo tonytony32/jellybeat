@@ -100,7 +100,7 @@ JellySleeveTests/             # Swift Testing target with Jellyfin response fixt
 docs/
   PLAN.md                     # The implementation plan this project followed
   BEST_PRACTICES.md           # Architecture + best-practices guide for a rebuild
-LICENSE                       # MIT
+LICENSE                       # AGPL-3.0
 ```
 
 ### Architecture
@@ -146,7 +146,7 @@ currently under test.
 ## Support and maintenance
 
 JellySleeve is a personal hobby project. Use it as you would any other
-piece of MIT-licensed software: **best effort, no warranty, no SLA on
+piece of AGPL-3.0-licensed software: **best effort, no warranty, no SLA on
 issue triage or PR review.**
 
 - Bug reports and feature requests are welcome — see the templates in
@@ -165,4 +165,4 @@ under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE).
+GNU Affero General Public License v3.0 (AGPL-3.0). See [`LICENSE`](LICENSE).
