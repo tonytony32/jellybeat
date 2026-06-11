@@ -55,7 +55,8 @@ private struct StandardBody: View {
                 imageTag: track.imageTag,
                 size: theme.layout.artworkSize ?? 256,
                 cornerRadius: 8,
-                shadowOpacity: theme.behavior.shadowOpacity
+                shadowOpacity: theme.behavior.shadowOpacity,
+                artworkURL: track.artworkURL
             )
             .overlay(alignment: .bottom) {
                 ControlsView(

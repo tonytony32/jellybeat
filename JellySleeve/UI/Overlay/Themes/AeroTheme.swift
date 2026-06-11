@@ -55,7 +55,8 @@ private struct AeroBody: View {
                 imageTag: track.imageTag,
                 size: artworkSize,
                 cornerRadius: 14,
-                shadowOpacity: theme.behavior.shadowOpacity
+                shadowOpacity: theme.behavior.shadowOpacity,
+                artworkURL: track.artworkURL
             )
             .overlay(alignment: .bottom) {
                 ControlsView(

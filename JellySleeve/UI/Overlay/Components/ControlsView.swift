@@ -47,8 +47,14 @@ struct ControlsView: View {
                 emphasised: true
             )
             controlButton(systemName: "forward.fill", action: .next)
-            favoriteButton
-            queueButton
+            // Capability-gated: hidden for sources without favorites / a queue
+            // (e.g. the YouTube bridge), shown for Jellyfin.
+            if player.capabilities.hasFavorites {
+                favoriteButton
+            }
+            if player.capabilities.hasQueue {
+                queueButton
+            }
         }
         .padding(.horizontal, behavior.controlsHasBackground ? 12 : 0)
         .padding(.vertical, behavior.controlsHasBackground ? 6 : 0)
