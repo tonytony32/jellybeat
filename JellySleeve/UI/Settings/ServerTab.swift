@@ -6,6 +6,7 @@ import os
 /// (`SettingsStore`) and Keychain (`KeychainHelper`).
 struct ServerTab: View {
     @Environment(SettingsStore.self) private var store
+    @Environment(PlayerStore.self) private var player
     @State private var probe: ProbeResult = .idle
     @FocusState private var focused: Field?
 
@@ -61,16 +62,25 @@ struct ServerTab: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Toggle(
-                        "Store API key in UserDefaults (less secure, portable across reinstalls)",
-                        isOn: $store.storeApiKeyInUserDefaults
+                        "Store API key in Keychain (encrypted at rest)",
+                        isOn: $store.storeApiKeyInKeychain
                     )
-                    Text("Keychain is recommended. Only enable this if you have a specific reason.")
+                    Text("Off by default: the key is saved with the app's other settings. Enable for encrypted at-rest storage — note macOS may re-prompt for Keychain access after app updates or rebuilds.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
 
             Section("Polling") {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(player.connectionMode.color)
+                        .frame(width: 6, height: 6)
+                    Text("Active transport: \(player.connectionMode.label)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 VStack(alignment: .leading, spacing: 6) {
                     Slider(
                         value: $store.refreshRate,
@@ -83,9 +93,17 @@ struct ServerTab: View {
                     } maximumValueLabel: {
                         Text("5s").font(.caption2).monospacedDigit()
                     }
+
                     Text(String(format: "Poll every %.2f seconds.", store.refreshRate))
                         .font(.caption)
                         .foregroundStyle(.secondary)
+
+                    Label(
+                        "Only a fallback for when the live connection is unavailable. While the live connection (WebSocket) is active, this has no effect — updates arrive in real time.",
+                        systemImage: "info.circle"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
             }
 
@@ -159,6 +177,7 @@ struct ServerTab: View {
 #Preview {
     ServerTab()
         .environment(SettingsStore())
+        .environment(PlayerStore())
         .frame(width: 520, height: 420)
 }
 

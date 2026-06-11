@@ -2,10 +2,10 @@ import Foundation
 import Testing
 @testable import JellySleeve
 
-/// Tests for `SettingsStore` API-key storage logic: migration from UserDefaults
-/// to Keychain on first launch, and correct read/write behaviour for each toggle
-/// state. Runs serialised because both `UserDefaults.standard` and the Keychain
-/// are process-wide shared resources.
+/// Tests for `SettingsStore` API-key storage logic: migration of legacy
+/// installs to the new UserDefaults default on first launch, and correct
+/// read/write behaviour for each toggle state. Runs serialised because both
+/// `UserDefaults.standard` and the Keychain are process-wide shared resources.
 @Suite(.serialized)
 @MainActor
 struct SettingsStoreTests {
@@ -14,6 +14,7 @@ struct SettingsStoreTests {
 
     private func resetState() {
         let d = UserDefaults.standard
+        d.removeObject(forKey: SettingsStore.Keys.storeApiKeyInKeychain)
         d.removeObject(forKey: SettingsStore.Keys.storeApiKeyInUserDefaults)
         d.removeObject(forKey: SettingsStore.Keys.useKeychain)
         d.removeObject(forKey: SettingsStore.Keys.apiKey)
@@ -22,108 +23,148 @@ struct SettingsStoreTests {
 
     // MARK: - Migration
 
-    /// Old install: `useKeychain == false` (pre-v0.2 default) and API key in
-    /// UserDefaults. After `SettingsStore.init()` the key must be in the
-    /// Keychain and the UserDefaults slot must be empty.
+    /// Legacy install on the previous default (key in Keychain, old toggle
+    /// `storeApiKeyInUserDefaults == false`). After `SettingsStore.init()` the
+    /// key must be migrated to UserDefaults, the Keychain entry cleared, and
+    /// the new toggle set to false.
     @Test
-    func migratesApiKeyFromUserDefaultsToKeychain() throws {
+    func migratesApiKeyFromKeychainToUserDefaults() throws {
         resetState()
         defer { resetState() }
 
         let testKey = "migration-test-key-abc123"
-        UserDefaults.standard.set(testKey, forKey: SettingsStore.Keys.apiKey)
-        UserDefaults.standard.set(false, forKey: SettingsStore.Keys.useKeychain)
+        try KeychainHelper.save(apiKey: testKey)
+        UserDefaults.standard.set(false, forKey: SettingsStore.Keys.storeApiKeyInUserDefaults)
 
         let store = SettingsStore()
 
         #expect(store.apiKey == testKey)
-        #expect(KeychainHelper.load() == testKey)
-        #expect(UserDefaults.standard.string(forKey: SettingsStore.Keys.apiKey) == nil)
-        #expect(store.storeApiKeyInUserDefaults == false)
+        #expect(UserDefaults.standard.string(forKey: SettingsStore.Keys.apiKey) == testKey)
+        #expect(KeychainHelper.load() == nil)
+        #expect(store.storeApiKeyInKeychain == false)
     }
 
-    /// Idempotency: running migration twice must not corrupt the key or break anything.
+    /// Legacy install with the key already in UserDefaults (old toggle
+    /// `storeApiKeyInUserDefaults == true`). The key must stay in UserDefaults
+    /// and the new toggle must be false.
+    @Test
+    func keepsApiKeyInUserDefaultsFromLegacyToggle() throws {
+        resetState()
+        defer { resetState() }
+
+        let testKey = "ud-legacy-key-456"
+        UserDefaults.standard.set(testKey, forKey: SettingsStore.Keys.apiKey)
+        UserDefaults.standard.set(true, forKey: SettingsStore.Keys.storeApiKeyInUserDefaults)
+
+        let store = SettingsStore()
+
+        #expect(store.apiKey == testKey)
+        #expect(UserDefaults.standard.string(forKey: SettingsStore.Keys.apiKey) == testKey)
+        #expect(KeychainHelper.load() == nil)
+        #expect(store.storeApiKeyInKeychain == false)
+    }
+
+    /// Idempotency: running migration twice must not corrupt the key.
     @Test
     func migrationIsIdempotent() throws {
         resetState()
         defer { resetState() }
 
         let testKey = "idempotency-key-xyz"
-        UserDefaults.standard.set(testKey, forKey: SettingsStore.Keys.apiKey)
-        UserDefaults.standard.set(false, forKey: SettingsStore.Keys.useKeychain)
+        try KeychainHelper.save(apiKey: testKey)
+        UserDefaults.standard.set(false, forKey: SettingsStore.Keys.storeApiKeyInUserDefaults)
 
         _ = SettingsStore()
         let store2 = SettingsStore()
 
         #expect(store2.apiKey == testKey)
-        #expect(KeychainHelper.load() == testKey)
-        #expect(UserDefaults.standard.string(forKey: SettingsStore.Keys.apiKey) == nil)
+        #expect(UserDefaults.standard.string(forKey: SettingsStore.Keys.apiKey) == testKey)
+        #expect(KeychainHelper.load() == nil)
     }
 
     // MARK: - Setter behaviour
 
-    /// Toggle ON (`storeApiKeyInUserDefaults = true`): setter must write to
-    /// UserDefaults and clear the Keychain entry.
+    /// Default toggle (`storeApiKeyInKeychain == false`): setter must write to
+    /// UserDefaults and leave the Keychain empty.
     @Test
-    func setterWritesToUserDefaultsWhenToggleOn() throws {
+    func setterWritesToUserDefaultsByDefault() throws {
         resetState()
         defer { resetState() }
 
         let store = SettingsStore()
-        store.storeApiKeyInUserDefaults = true
+        #expect(store.storeApiKeyInKeychain == false)
         store.apiKey = "ud-key-12345"
 
         #expect(UserDefaults.standard.string(forKey: SettingsStore.Keys.apiKey) == "ud-key-12345")
         #expect(KeychainHelper.load() == nil)
     }
 
-    /// Toggle OFF (`storeApiKeyInUserDefaults = false`, the default): setter
-    /// must write to Keychain and leave the UserDefaults slot empty.
+    /// Toggle ON (`storeApiKeyInKeychain = true`): setter must write to the
+    /// Keychain and clear the UserDefaults slot.
     @Test
-    func setterWritesToKeychainWhenToggleOff() throws {
+    func setterWritesToKeychainWhenToggleOn() throws {
         resetState()
         defer { resetState() }
 
         let store = SettingsStore()
-        store.storeApiKeyInUserDefaults = false
+        store.storeApiKeyInKeychain = true
         store.apiKey = "kc-key-67890"
 
         #expect(KeychainHelper.load() == "kc-key-67890")
         #expect(UserDefaults.standard.string(forKey: SettingsStore.Keys.apiKey) == nil)
     }
 
-    /// Flipping the toggle from OFF → ON must move the key from Keychain to
-    /// UserDefaults and not leave a copy in the Keychain.
+    /// Flipping the toggle from OFF → ON must move the key from UserDefaults to
+    /// the Keychain and not leave a copy in UserDefaults.
     @Test
-    func flippingToggleOnMigratesKeychainToUserDefaults() throws {
+    func flippingToggleOnMigratesUserDefaultsToKeychain() throws {
         resetState()
         defer { resetState() }
 
         let store = SettingsStore()
         store.apiKey = "flip-key-toggle"
-        #expect(KeychainHelper.load() == "flip-key-toggle")
-
-        store.storeApiKeyInUserDefaults = true
-
         #expect(UserDefaults.standard.string(forKey: SettingsStore.Keys.apiKey) == "flip-key-toggle")
-        #expect(KeychainHelper.load() == nil)
+
+        store.storeApiKeyInKeychain = true
+
+        #expect(KeychainHelper.load() == "flip-key-toggle")
+        #expect(UserDefaults.standard.string(forKey: SettingsStore.Keys.apiKey) == nil)
     }
 
-    /// Flipping the toggle from ON → OFF must move the key from UserDefaults
-    /// to Keychain and remove it from UserDefaults.
+    /// Flipping the toggle from ON → OFF must move the key from the Keychain
+    /// back to UserDefaults and remove it from the Keychain.
     @Test
-    func flippingToggleOffMigratesUserDefaultsToKeychain() throws {
+    func flippingToggleOffMigratesKeychainToUserDefaults() throws {
         resetState()
         defer { resetState() }
 
         let store = SettingsStore()
-        store.storeApiKeyInUserDefaults = true
+        store.storeApiKeyInKeychain = true
         store.apiKey = "flip-key-back"
-        #expect(UserDefaults.standard.string(forKey: SettingsStore.Keys.apiKey) == "flip-key-back")
-
-        store.storeApiKeyInUserDefaults = false
-
         #expect(KeychainHelper.load() == "flip-key-back")
+
+        store.storeApiKeyInKeychain = false
+
+        #expect(UserDefaults.standard.string(forKey: SettingsStore.Keys.apiKey) == "flip-key-back")
+        #expect(KeychainHelper.load() == nil)
+    }
+
+    /// Once the new toggle is stored, a subsequent launch must honor it
+    /// verbatim without re-running migration.
+    @Test
+    func honorsStoredKeychainToggleOnRelaunch() throws {
+        resetState()
+        defer { resetState() }
+
+        let store = SettingsStore()
+        store.storeApiKeyInKeychain = true
+        store.apiKey = "relaunch-key"
+
+        let store2 = SettingsStore()
+
+        #expect(store2.storeApiKeyInKeychain == true)
+        #expect(store2.apiKey == "relaunch-key")
+        #expect(KeychainHelper.load() == "relaunch-key")
         #expect(UserDefaults.standard.string(forKey: SettingsStore.Keys.apiKey) == nil)
     }
 }
