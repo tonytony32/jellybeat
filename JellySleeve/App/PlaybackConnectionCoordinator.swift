@@ -277,13 +277,28 @@ final class PlaybackConnectionCoordinator {
         }
     }
 
-    /// Wake the polling loop for an immediate Jellyfin refresh. Used by the
-    /// arbiter when control flips back to Jellyfin so the overlay repopulates
-    /// promptly instead of waiting for the next poll tick. A no-op while the
-    /// socket is the live transport (the server is already pushing).
+    /// Force an immediate Jellyfin refresh. Used by the arbiter when control
+    /// flips back to Jellyfin so the overlay repopulates promptly instead of
+    /// waiting for the next transport tick.
+    ///
+    /// In polling mode, poke the poller. In WebSocket mode the poller is stopped,
+    /// so poking it does nothing and the overlay would otherwise sit on stale
+    /// state (e.g. the idle snapshot YouTube left) until the next socket push —
+    /// up to several seconds, with the controls inert. Do a one-shot
+    /// `fetchSessions` + `ingest` instead so the flip-back is instant regardless
+    /// of transport. Both ingests run on the main actor, so this can't race the
+    /// socket's.
     func forceRefresh() {
-        guard let poller else { return }
-        Task { await poller.forceRefresh() }
+        if player.connectionMode == .polling, let poller {
+            Task { await poller.forceRefresh() }
+            return
+        }
+        guard let client = currentClient,
+              let userId = settings.jellyfinConfiguration?.userId else { return }
+        Task { @MainActor in
+            guard let sessions = try? await client.fetchSessions() else { return }
+            player.ingest(sessions: sessions, userId: userId)
+        }
     }
 
     func resume(reason: String) {

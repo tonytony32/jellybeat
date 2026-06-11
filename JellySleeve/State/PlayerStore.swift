@@ -138,8 +138,14 @@ final class PlayerStore {
     var jellyfinIsActiveSource: Bool = true
 
     /// Presence signal for the arbiter, refreshed on every Jellyfin `ingest`
-    /// regardless of gating: true when a Jellyfin session is actively playing.
+    /// regardless of gating: true when a Jellyfin session has a now-playing item
+    /// (playing OR paused).
     private(set) var jellyfinHasNowPlaying: Bool = false
+
+    /// Stronger signal for the arbiter: true when Jellyfin has a now-playing item
+    /// AND it is actually playing (not paused). Lets the arbiter prefer a source
+    /// that is genuinely playing over one merely parked/paused.
+    private(set) var jellyfinIsPlaying: Bool = false
 
     /// Item id of the current Jellyfin pick (even while gated), so the arbiter
     /// can tell when Jellyfin's playback *changed* for most-recently-changed
@@ -411,9 +417,11 @@ final class PlayerStore {
         let summaries = Self.summaries(of: sessions, userId: userId)
         let queue = pick.map { Self.makeQueue(from: $0) } ?? []
 
-        // Refresh the arbiter's presence signal on every poll, gated or not, so
-        // it can detect Jellyfin starting/stopping even while YouTube drives.
+        // Refresh the arbiter's presence signals on every poll, gated or not, so
+        // it can detect Jellyfin starting/stopping/pausing even while YouTube
+        // drives.
         jellyfinHasNowPlaying = snapshot != nil
+        jellyfinIsPlaying = snapshot != nil && !pausedFromServer
         jellyfinNowPlayingId = snapshot?.itemId
         onJellyfinUpdate?()
 
