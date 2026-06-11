@@ -44,6 +44,12 @@ nonisolated struct TrackSnapshot: Equatable, Sendable {
     /// heart button's filled/outline state.
     let isFavorite: Bool
 
+    /// Direct artwork URL, when the source provides one (e.g. the YouTube
+    /// bridge's `artworkUrl`). `nil` for Jellyfin, whose covers are fetched by
+    /// `artworkItemId` + `imageTag` through `ArtworkCache`. When present it
+    /// short-circuits id-based fetching in `ArtworkView` (see the contract's §6).
+    let artworkURL: URL?
+
     /// Returns a copy with a different `isFavorite`. Used by `PlayerStore` for
     /// the optimistic heart toggle (and its revert on failure) without rebuilding
     /// every field by hand.
@@ -58,7 +64,8 @@ nonisolated struct TrackSnapshot: Equatable, Sendable {
             runtime: runtime,
             position: position,
             sessionId: sessionId,
-            isFavorite: value
+            isFavorite: value,
+            artworkURL: artworkURL
         )
     }
 }

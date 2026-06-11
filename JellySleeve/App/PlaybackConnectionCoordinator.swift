@@ -277,6 +277,15 @@ final class PlaybackConnectionCoordinator {
         }
     }
 
+    /// Wake the polling loop for an immediate Jellyfin refresh. Used by the
+    /// arbiter when control flips back to Jellyfin so the overlay repopulates
+    /// promptly instead of waiting for the next poll tick. A no-op while the
+    /// socket is the live transport (the server is already pushing).
+    func forceRefresh() {
+        guard let poller else { return }
+        Task { await poller.forceRefresh() }
+    }
+
     func resume(reason: String) {
         if let poller {
             Self.logger.notice("Resume poller (\(reason, privacy: .public))")

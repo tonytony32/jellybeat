@@ -15,6 +15,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let player: PlayerStore
     let themes: ThemeRegistry
     let artworkProvider: ArtworkCacheProvider
+    /// Decides which source (Jellyfin / YouTube) drives the overlay. Exposed so
+    /// the menu-bar "Source" section can mark the active one.
+    let arbiter: SourceArbiter
 
     private let windowController: OverlayWindowController
     private let connection: PlaybackConnectionCoordinator
@@ -36,10 +39,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             themes: themes,
             artworkProvider: artworkProvider
         )
-        self.connection = PlaybackConnectionCoordinator(
+        let connection = PlaybackConnectionCoordinator(
             settings: settings,
             player: player,
             artworkProvider: artworkProvider
+        )
+        self.connection = connection
+        // The YouTube bridge feed + its client (shared as the command sink), and
+        // the arbiter that picks the active source between it and Jellyfin.
+        let ytClient = YouTubeBridgeClient()
+        let ytFeed = YouTubeBridgeFeed(client: ytClient)
+        self.arbiter = SourceArbiter(
+            settings: settings,
+            player: player,
+            coordinator: connection,
+            ytFeed: ytFeed,
+            ytClient: ytClient
         )
         super.init()
         // Tell macOS not to restore Settings between launches. Without this,
@@ -53,16 +68,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Window-visibility events (miniaturise / close / deminiaturise) and
-        // the user reopening the overlay should pause or resume the feed.
+        // the user reopening the overlay should pause or resume both feeds via
+        // the arbiter, so the YouTube poll stops alongside the Jellyfin transport.
         windowController.onPauseRequested = { [weak self] reason in
-            self?.connection.pause(reason: reason)
+            self?.arbiter.pause(reason: reason)
         }
         windowController.onResumeRequested = { [weak self] reason in
-            self?.connection.resume(reason: reason)
+            self?.arbiter.resume(reason: reason)
         }
 
         windowController.createWindow()
-        connection.activate()
+        arbiter.activate()
         windowController.startObserving()
         activateMediaCenter()
         windowController.closeRestoredScenesExceptOverlay()
@@ -79,7 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        connection.shutdown()
+        arbiter.shutdown()
         windowController.shutdown()
     }
 

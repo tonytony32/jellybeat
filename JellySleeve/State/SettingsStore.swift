@@ -69,6 +69,16 @@ final class SettingsStore {
         }
     }
 
+    /// Which playback source drives the overlay: `auto` lets the arbiter pick
+    /// the active source, `jellyfin` / `youtube` pin one. Persisted so a user's
+    /// pick survives relaunch. Mirrors the `appPresence` `@AppStorage` pattern
+    /// so the menu-bar binding in `JellySleeveApp` reacts to changes.
+    var sourceSelection: SourceSelection {
+        didSet {
+            UserDefaults.standard.set(sourceSelection.rawValue, forKey: Keys.sourceSelection)
+        }
+    }
+
     var launchAtLogin: Bool {
         didSet {
             do {
@@ -155,6 +165,7 @@ final class SettingsStore {
         let defaults = UserDefaults.standard
 
         self.appPresence = AppPresence(rawValue: defaults.string(forKey: Keys.appPresence) ?? "") ?? .dockAndMenuBar
+        self.sourceSelection = SourceSelection(rawValue: defaults.string(forKey: Keys.sourceSelection) ?? "") ?? .auto
         self.launchAtLogin = SMAppService.mainApp.status == .enabled
 
         self.baseURLString = (defaults.string(forKey: Keys.baseURL) ?? "")
@@ -238,6 +249,7 @@ final class SettingsStore {
 
     enum Keys {
         static let appPresence = "settings.appPresence"
+        static let sourceSelection = "settings.sourceSelection"
         static let baseURL = "settings.baseURL"
         static let userId = "settings.userId"
         static let allowSelfSigned = "settings.allowSelfSigned"
@@ -290,6 +302,33 @@ final class SettingsStore {
     }
 
     private static let deviceIdKey = "settings.deviceId"
+}
+
+/// The overlay's playback-source preference, persisted in `SettingsStore`.
+/// `auto` defers to the arbiter; the other cases pin a specific source.
+nonisolated enum SourceSelection: String, CaseIterable, Identifiable, Sendable {
+    case auto
+    case jellyfin
+    case youtube
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .auto:     return "Automatic"
+        case .jellyfin: return "Jellyfin"
+        case .youtube:  return "YouTube"
+        }
+    }
+
+    /// The pinned source, or `nil` in `auto` (let the arbiter decide).
+    var forcedKind: SourceKind? {
+        switch self {
+        case .auto:     return nil
+        case .jellyfin: return .jellyfin
+        case .youtube:  return .youtube
+        }
+    }
 }
 
 nonisolated enum AppPresence: String, CaseIterable, Identifiable, Sendable {

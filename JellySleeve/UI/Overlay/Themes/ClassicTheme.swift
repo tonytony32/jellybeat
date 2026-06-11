@@ -60,7 +60,8 @@ private struct ClassicBody: View {
                 imageTag: track.imageTag,
                 size: theme.layout.artworkSize ?? 120,
                 cornerRadius: 6,
-                shadowOpacity: theme.behavior.shadowOpacity
+                shadowOpacity: theme.behavior.shadowOpacity,
+                artworkURL: track.artworkURL
             )
 
             VStack(alignment: .leading, spacing: 4) {

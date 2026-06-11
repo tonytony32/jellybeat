@@ -28,6 +28,9 @@ struct JellySleeveApp: App {
             Button(String(localized: "Open Overlay")) {
                 appDelegate.showOverlay()
             }
+            Divider()
+            sourceSection
+            Divider()
             SettingsLink {
                 Text(String(localized: "Settings…"))
             }
@@ -41,6 +44,39 @@ struct JellySleeveApp: App {
             }
             .keyboardShortcut("q", modifiers: .command)
         }
+    }
+
+    /// "Source" picker in the menu: Automatic / Jellyfin / YouTube, radio-style
+    /// (✓ on the chosen one). In Automatic mode the label also notes which
+    /// source is currently driving the overlay (`arbiter.activeKind`).
+    @ViewBuilder
+    private var sourceSection: some View {
+        Picker(selection: sourceBinding) {
+            ForEach(SourceSelection.allCases) { option in
+                Text(sourceLabel(for: option)).tag(option)
+            }
+        } label: {
+            Text(String(localized: "Source"))
+        }
+        .pickerStyle(.inline)
+    }
+
+    private var sourceBinding: Binding<SourceSelection> {
+        Binding(
+            get: { appDelegate.settings.sourceSelection },
+            set: { appDelegate.settings.sourceSelection = $0 }
+        )
+    }
+
+    private func sourceLabel(for option: SourceSelection) -> String {
+        guard option == .auto,
+              appDelegate.settings.sourceSelection == .auto else {
+            return option.displayName
+        }
+        let driving = appDelegate.arbiter.activeKind == .youtube
+            ? String(localized: "YouTube")
+            : String(localized: "Jellyfin")
+        return String(localized: "Automatic (\(driving))")
     }
 
     private func showAboutPanel() {

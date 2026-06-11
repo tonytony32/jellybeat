@@ -40,6 +40,12 @@ final class PlayerStore {
     var currentTrack: TrackSnapshot? = nil
     var isPaused: Bool = false
 
+    /// Capabilities of the source currently driving the overlay. Drives
+    /// capability-gated UI (favorite heart, queue affordance). Defaults to
+    /// Jellyfin because the app comes up on the Jellyfin transport; the arbiter
+    /// swaps it when YouTube takes over.
+    var capabilities: SourceCapabilities = .jellyfin
+
     /// The active client's play queue (current track + up next), surfaced in
     /// the controls' queue popover. Empty when the playing client doesn't
     /// report one. Cleared alongside `currentTrack` when playback stops.
@@ -109,8 +115,40 @@ final class PlayerStore {
 
     // MARK: - Wired in by AppDelegate
 
+    /// Jellyfin REST handle, used for the Jellyfin-only operations the
+    /// vendor-neutral command sink doesn't cover: Instant Mix, queue jumps, and
+    /// the authoritative favorite read. `nil` while no Jellyfin stack is built.
     private var client: JellyfinClient?
     private var poller: PlaybackPoller?
+
+    /// The vendor-neutral transport sink for the source currently driving the
+    /// overlay (a `JellyfinCommandSink` while Jellyfin is active, the YouTube
+    /// bridge client while YouTube is). All transport / seek / volume / favorite
+    /// actions route through this so the views never branch on the backend.
+    private var commandSink: (any PlaybackCommanding)?
+
+    // MARK: - Source arbitration (set by SourceArbiter)
+
+    /// True when Jellyfin is the source allowed to write the shared overlay
+    /// state. When false (YouTube is driving), Jellyfin keeps polling for
+    /// presence but its `ingest` / `updateConnection` writes are dropped so they
+    /// can't clobber the YouTube snapshot the arbiter is publishing. Defaults to
+    /// true so direct `ingest` callers (tests, Jellyfin-only operation) behave
+    /// exactly as before.
+    var jellyfinIsActiveSource: Bool = true
+
+    /// Presence signal for the arbiter, refreshed on every Jellyfin `ingest`
+    /// regardless of gating: true when a Jellyfin session is actively playing.
+    private(set) var jellyfinHasNowPlaying: Bool = false
+
+    /// Item id of the current Jellyfin pick (even while gated), so the arbiter
+    /// can tell when Jellyfin's playback *changed* for most-recently-changed
+    /// arbitration.
+    private(set) var jellyfinNowPlayingId: String?
+
+    /// Called after every Jellyfin `ingest` so the arbiter can re-evaluate which
+    /// source should drive, using the refreshed presence signal above.
+    var onJellyfinUpdate: (@MainActor () -> Void)?
 
     // MARK: - Internals
 
@@ -162,11 +200,24 @@ final class PlayerStore {
 
     // MARK: Configuration
 
-    /// Called by `AppDelegate` whenever the polling stack is (re)built. Pass
-    /// `nil` for both to detach when the user clears the configuration.
+    /// Called by the Jellyfin coordinator whenever the polling stack is
+    /// (re)built. Pass `nil` for both to detach when the user clears the
+    /// configuration. The vendor-neutral command sink is established separately:
+    /// for Jellyfin it's rebuilt per session inside `ingest`.
     func configure(client: JellyfinClient?, poller: PlaybackPoller?) {
         self.client = client
         self.poller = poller
+        if client == nil, commandSink is JellyfinCommandSink {
+            commandSink = nil
+        }
+    }
+
+    /// Install the active source's transport sink and capabilities. Called by
+    /// the arbiter when YouTube takes over (and to hand control back to
+    /// Jellyfin, which then rebuilds its per-session sink on the next `ingest`).
+    func setCommandSink(_ sink: (any PlaybackCommanding)?, capabilities: SourceCapabilities) {
+        self.commandSink = sink
+        if self.capabilities != capabilities { self.capabilities = capabilities }
     }
 
     // MARK: Polling updates
@@ -242,17 +293,37 @@ final class PlayerStore {
                 self?.resetInstantMix()
             }
         }
+    }
 
-        if let pick = selectedSessionId,
-           !sessions.contains(where: { $0.id == pick }) {
-            Self.logger.notice("Dropping stale selectedSessionId \(pick, privacy: .public).")
-            selectedSessionId = nil
-        }
+    /// Apply a snapshot from a non-Jellyfin source (the YouTube bridge), routed
+    /// through the same `apply(...)` path so the optimistic-update protection
+    /// for local play/pause and volume changes applies identically. Carries no
+    /// sessions or queue (those are Jellyfin concepts); favorites are inert
+    /// because the YouTube command sink reports them unsupported and the heart
+    /// UI is hidden via `capabilities`.
+    func applyExternalSnapshot(
+        track: TrackSnapshot?,
+        isPaused: Bool,
+        volume: Int?,
+        connection: ConnectionState
+    ) {
+        apply(
+            connectionState: connection,
+            track: track,
+            isPaused: isPaused,
+            volume: volume,
+            sessions: [],
+            queue: []
+        )
     }
 
     /// Convenience for transient lifecycle states (connecting, reconnecting,
     /// errors) that do not carry a snapshot.
     func updateConnection(_ state: ConnectionState) {
+        // Dropped while YouTube is driving: the Jellyfin transport keeps
+        // running for presence, but its lifecycle blips (a reconnecting tick,
+        // an idle reset) must not repaint the overlay the YouTube feed owns.
+        guard jellyfinIsActiveSource else { return }
         // The poller re-emits `.reconnecting` on every failed tick; skip the
         // no-op assignment so we don't churn the Observation graph.
         guard connectionState != state else { return }
@@ -340,6 +411,23 @@ final class PlayerStore {
         let summaries = Self.summaries(of: sessions, userId: userId)
         let queue = pick.map { Self.makeQueue(from: $0) } ?? []
 
+        // Refresh the arbiter's presence signal on every poll, gated or not, so
+        // it can detect Jellyfin starting/stopping even while YouTube drives.
+        jellyfinHasNowPlaying = snapshot != nil
+        jellyfinNowPlayingId = snapshot?.itemId
+        onJellyfinUpdate?()
+
+        // Gated: YouTube is the active source, so don't let Jellyfin write the
+        // shared overlay state (it keeps polling purely for the presence signal
+        // above). Also leave the command sink untouched — it points at YouTube.
+        guard jellyfinIsActiveSource else { return }
+
+        // Keep the transport sink pointed at the current Jellyfin session so
+        // play/pause/seek/volume/favorite target the device we're mirroring.
+        if let client, let session = pick?.id {
+            commandSink = JellyfinCommandSink(client: client, sessionId: session)
+        }
+
         apply(
             connectionState: .connected,
             track: snapshot,
@@ -348,6 +436,15 @@ final class PlayerStore {
             sessions: summaries,
             queue: queue
         )
+
+        // Drop a manual device pick that no longer exists among this user's
+        // Jellyfin sessions. Lives here (not in `apply`) so an external snapshot,
+        // which carries no sessions, can't wipe the user's Jellyfin pick.
+        if let pick = selectedSessionId,
+           !summaries.contains(where: { $0.id == pick }) {
+            Self.logger.notice("Dropping stale selectedSessionId \(pick, privacy: .public).")
+            selectedSessionId = nil
+        }
     }
 
     /// Resolve the friendliest artist label for an item, preferring the
@@ -380,7 +477,8 @@ final class PlayerStore {
             runtime: .seconds(runtimeSeconds),
             position: .seconds(positionSeconds),
             sessionId: session.id,
-            isFavorite: item.userData?.isFavorite ?? false
+            isFavorite: item.userData?.isFavorite ?? false,
+            artworkURL: nil
         )
     }
 
@@ -481,8 +579,8 @@ final class PlayerStore {
         let expectedPaused = !isPaused
         isPaused.toggle()
         flashFeedback(.playPause)
-        await sendCommand(name: "play/pause") { client, sessionId in
-            try await client.playPause(sessionId: sessionId)
+        await sendCommand(name: "play/pause") { sink in
+            try await sink.playPause()
         }
         // Capture the timestamp set by sendCommand so we can detect whether a
         // newer command has been issued by the time the deferred check runs.
@@ -499,7 +597,10 @@ final class PlayerStore {
             guard self.currentTrack != nil,
                   self.lastCommandAt == thisCommandAt else { return }
             if self.isPaused != expectedPaused {
-                self.showTransient("Player didn't respond — bring Jellyfin to the foreground.")
+                // Source-agnostic: the same symptom (a throttled background tab)
+                // applies whether Jellyfin's web client or the YouTube bridge is
+                // driving, so don't name a specific app here.
+                self.showTransient("Player didn't respond — bring it to the foreground.")
             }
         }
     }
@@ -510,8 +611,8 @@ final class PlayerStore {
         // flash doesn't fire for a command that sendCommand will drop.
         guard !isCommandInFlight else { return }
         flashFeedback(.next)
-        await sendCommand(name: "next") { client, sessionId in
-            try await client.nextTrack(sessionId: sessionId)
+        await sendCommand(name: "next") { sink in
+            try await sink.next()
         }
     }
 
@@ -519,8 +620,8 @@ final class PlayerStore {
         guard isLinkLive else { showTransient(unreachableHint); return }
         guard !isCommandInFlight else { return }
         flashFeedback(.previous)
-        await sendCommand(name: "previous") { client, sessionId in
-            try await client.previousTrack(sessionId: sessionId)
+        await sendCommand(name: "previous") { sink in
+            try await sink.previous()
         }
     }
 
@@ -533,7 +634,7 @@ final class PlayerStore {
         guard !item.isCurrent else { return }
         guard let startIndex = queue.firstIndex(where: { $0.id == item.id }) else { return }
         let itemIds = queue.map(\.itemId)
-        await sendCommand(name: "play queue item") { client, sessionId in
+        await sendJellyfinCommand(name: "play queue item") { client, sessionId in
             try await client.play(sessionId: sessionId, itemIds: itemIds, startIndex: startIndex)
         }
     }
@@ -581,7 +682,7 @@ final class PlayerStore {
         guard isLinkLive else { showTransient(unreachableHint); return }
         guard let startIndex = instantMix.firstIndex(where: { $0.id == item.id }) else { return }
         let itemIds = instantMix[startIndex...].map(\.itemId)
-        await sendCommand(name: "play instant mix item") { client, sessionId in
+        await sendJellyfinCommand(name: "play instant mix item") { client, sessionId in
             try await client.play(sessionId: sessionId, itemIds: itemIds, startIndex: 0)
         }
     }
@@ -599,10 +700,9 @@ final class PlayerStore {
     /// before the WebSocket pushes the new state back from the server.
     func seek(toSeconds seconds: Double) async {
         guard isLinkLive else { showTransient(unreachableHint); return }
-        guard let client else { return }
+        guard let commandSink else { return }
         guard let current = currentTrack else { return }
         let target = max(0, seconds)
-        let ticks = Int64(target * 10_000_000)
 
         // Optimistic update.
         currentTrack = TrackSnapshot(
@@ -615,12 +715,13 @@ final class PlayerStore {
             runtime: current.runtime,
             position: .seconds(target),
             sessionId: current.sessionId,
-            isFavorite: current.isFavorite
+            isFavorite: current.isFavorite,
+            artworkURL: current.artworkURL
         )
         lastCommandAt = Date()
 
         do {
-            try await client.seek(sessionId: current.sessionId, positionTicks: ticks)
+            try await commandSink.seek(to: .seconds(target))
             await poller?.forceRefresh()
             Self.logger.notice("Seek to \(target, privacy: .public)s OK")
         } catch let error as NetworkError {
@@ -643,8 +744,8 @@ final class PlayerStore {
         // Suppressed while the queue popover is open so the wheel scrolls the
         // queue list rather than changing volume behind it.
         guard !isQueuePopoverOpen else { return }
-        // Volume only means something when a client is actually playing.
-        guard let current = currentTrack else { return }
+        // Volume only means something when a source is actually playing.
+        guard currentTrack != nil else { return }
         let newValue = min(100, max(0, volume + delta))
         lastVolumeCommandAt = Date()
         flashVolume(newValue)
@@ -653,13 +754,13 @@ final class PlayerStore {
         // send when the value genuinely changed.
         guard newValue != volume else { return }
         volume = newValue
-        scheduleVolumeSend(to: newValue, sessionId: current.sessionId)
+        scheduleVolumeSend(to: newValue)
     }
 
     /// Throttled `SetVolume` dispatch. Fires immediately on the first tick of a
     /// gesture, then at most once every `volumeThrottleInterval` so the Jellyfin
     /// client tracks the knob in real time rather than snapping at the end.
-    private func scheduleVolumeSend(to value: Int, sessionId: String) {
+    private func scheduleVolumeSend(to value: Int) {
         volumeSendTask?.cancel()
         let elapsed = lastVolumeSentAt.map { Date().timeIntervalSince($0) } ?? .infinity
         let remaining = Self.volumeThrottleInterval - elapsed
@@ -667,7 +768,7 @@ final class PlayerStore {
         if remaining <= 0 {
             lastVolumeSentAt = Date()
             Task { @MainActor [weak self] in
-                await self?.sendVolume(value, sessionId: sessionId)
+                await self?.sendVolume(value)
             }
         } else {
             volumeSendTask = Task { @MainActor [weak self] in
@@ -675,7 +776,7 @@ final class PlayerStore {
                 try? await Task.sleep(nanoseconds: ns)
                 guard !Task.isCancelled, let self else { return }
                 self.lastVolumeSentAt = Date()
-                await self.sendVolume(value, sessionId: sessionId)
+                await self.sendVolume(value)
             }
         }
     }
@@ -687,10 +788,10 @@ final class PlayerStore {
     /// is corrected by the next one 80 ms later. A genuine outage already
     /// surfaces through `connectionState` (the poller flips the link indicator),
     /// so a per-tick toast would only spam noise that breaks the scroll's feel.
-    private func sendVolume(_ value: Int, sessionId: String) async {
-        guard let client else { return }
+    private func sendVolume(_ value: Int) async {
+        guard let commandSink else { return }
         do {
-            try await client.setVolume(sessionId: sessionId, volume: value)
+            try await commandSink.setVolume(percent: value)
             Self.logger.notice("SetVolume \(value, privacy: .public) OK")
         } catch {
             Self.logger.error("SetVolume failed: \(String(describing: error), privacy: .public)")
@@ -713,7 +814,10 @@ final class PlayerStore {
     /// and surfaces a toast.
     func toggleFavorite() async {
         guard isLinkLive else { showTransient(unreachableHint); return }
-        guard let client else { return }
+        // The active source has no favorites (YouTube); the heart is hidden, but
+        // guard defensively so an errant call is a no-op rather than a misfire.
+        guard capabilities.hasFavorites else { return }
+        guard let commandSink else { return }
         guard let current = currentTrack else { return }
         // Drop overlapping toggles so a double-click doesn't fire two opposite
         // requests that race.
@@ -729,12 +833,14 @@ final class PlayerStore {
 
         do {
             // Trust the server's reported value rather than re-polling
-            // `/Sessions` (which doesn't carry reliable `UserData`).
-            let result = try await client.setFavorite(itemId: current.itemId, isFavorite: target)
-            if let now = currentTrack, now.itemId == current.itemId {
+            // `/Sessions` (which doesn't carry reliable `UserData`). A `nil`
+            // result means the source doesn't track favorites — keep the
+            // optimistic flip in that (unreachable) case.
+            let result = try await commandSink.toggleFavorite(itemId: current.itemId, current: current.isFavorite)
+            if let result, let now = currentTrack, now.itemId == current.itemId {
                 currentTrack = now.withFavorite(result)
             }
-            Self.logger.notice("Set favorite=\(result, privacy: .public) OK")
+            Self.logger.notice("Set favorite=\(String(describing: result), privacy: .public) OK")
         } catch let error as NetworkError {
             revertFavorite(itemId: current.itemId, to: current.isFavorite)
             Self.logger.error("Set favorite failed: \(String(describing: error), privacy: .public)")
@@ -750,6 +856,10 @@ final class PlayerStore {
     /// item is still showing. Fired on track change because the poll can't be
     /// trusted for this field.
     private func refreshFavorite(for itemId: String) {
+        // Only meaningful for a source that has favorites (Jellyfin). Skipped for
+        // YouTube — whose id is a videoId Jellyfin can't resolve — even though
+        // the Jellyfin client stays alive in the background while YouTube drives.
+        guard capabilities.hasFavorites else { return }
         guard let client else { return }
         favoriteRefreshTask?.cancel()
         favoriteRefreshTask = Task { @MainActor [weak self] in
@@ -803,10 +913,44 @@ final class PlayerStore {
 
     // MARK: Internals
 
-    /// Common command path: marks `isCommandInFlight`, fires the request,
-    /// asks the poller for an immediate refresh, and ensures the in-flight
-    /// flag stays true for at least 300 ms (plan §5.5).
+    /// Common transport-command path (vendor-neutral): marks `isCommandInFlight`,
+    /// fires the request against the active source's sink, asks the Jellyfin
+    /// poller for an immediate refresh (a no-op when YouTube drives), and ensures
+    /// the in-flight flag stays true for at least 300 ms (plan §5.5).
     private func sendCommand(
+        name: String,
+        _ work: @Sendable (any PlaybackCommanding) async throws -> Void
+    ) async {
+        guard !isCommandInFlight else { return }
+        guard let commandSink else {
+            Self.logger.error("Command \(name, privacy: .public) ignored: no command sink")
+            return
+        }
+
+        isCommandInFlight = true
+        lastCommandAt = Date()
+        let startNanos = DispatchTime.now().uptimeNanoseconds
+
+        do {
+            try await work(commandSink)
+            await poller?.forceRefresh()
+            Self.logger.notice("Command \(name, privacy: .public) OK")
+        } catch let error as NetworkError {
+            Self.logger.error("Command \(name, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+            showTransient(error.errorDescription ?? "Command failed.")
+        } catch {
+            Self.logger.error("Command \(name, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+            showTransient(error.localizedDescription)
+        }
+
+        await holdCooldown(since: startNanos)
+        isCommandInFlight = false
+    }
+
+    /// Jellyfin-only command path for operations the vendor-neutral sink doesn't
+    /// model (queue jumps via `play`). Targets the current session directly.
+    /// Same in-flight / cooldown discipline as `sendCommand`.
+    private func sendJellyfinCommand(
         name: String,
         _ work: @Sendable (JellyfinClient, String) async throws -> Void
     ) async {
@@ -836,13 +980,17 @@ final class PlayerStore {
             showTransient(error.localizedDescription)
         }
 
-        // Keep the cooldown at >= 300 ms from the original press, even if the
-        // command was faster, so double-taps are absorbed.
+        await holdCooldown(since: startNanos)
+        isCommandInFlight = false
+    }
+
+    /// Keep the cooldown at >= 300 ms from the original press, even if the
+    /// command was faster, so double-taps are absorbed.
+    private func holdCooldown(since startNanos: UInt64) async {
         let elapsed = DispatchTime.now().uptimeNanoseconds - startNanos
         let target: UInt64 = 300_000_000
         if elapsed < target {
             try? await Task.sleep(nanoseconds: target - elapsed)
         }
-        isCommandInFlight = false
     }
 }
