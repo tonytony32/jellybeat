@@ -145,12 +145,15 @@ final class SourceArbiter {
 
     /// Pure decision policy (extracted for testing). In order:
     /// 1. A forced selection wins outright.
-    /// 2. A source that is genuinely *playing* beats one that is merely active
-    ///    but paused — the common case (Jellyfin parked/paused while YouTube
-    ///    plays, or vice-versa) resolves to whatever is actually making sound.
-    /// 3. Both playing (or neither, just paused/idle): the active sources tie-
-    ///    break by most-recently-*activated* (the source the user started last).
-    /// 4. With neither active, the current source stays put.
+    /// 2. Exactly one source genuinely *playing* → it wins (over an idle/paused
+    ///    other). Resolves the common "Jellyfin parked while YouTube plays".
+    /// 3. Both playing → most-recently-*activated* (the source the user started
+    ///    last); auto-advance can't steal because it never re-activates.
+    /// 4. Neither playing → fall back to Jellyfin (the home source) whenever it
+    ///    has a session at all, so pausing/stopping YouTube reveals Jellyfin
+    ///    instead of lingering on a paused YouTube cover. YouTube only holds the
+    ///    overlay here when it is the *only* source present.
+    /// 5. With neither active, the current source stays put.
     static func decide(
         selection: SourceSelection,
         ytPlaying: Bool,
@@ -161,15 +164,16 @@ final class SourceArbiter {
         current: SourceKind
     ) -> SourceKind {
         if let forced = selection.forcedKind { return forced }
-        // Genuinely playing beats merely-active-but-paused.
+        // Exactly one genuinely playing → it wins.
         if ytPlaying && !jfPlaying { return .youtube }
         if jfPlaying && !ytPlaying { return .jellyfin }
-        // Both playing, or both only paused/active: activeness + recency.
-        if ytActive && jfActive {
+        // Both playing → most-recently-activated (auto-advance can't steal).
+        if ytPlaying && jfPlaying {
             return ytActivatedNoOlderThanJf ? .youtube : .jellyfin
         }
-        if ytActive { return .youtube }
+        // Neither playing: prefer Jellyfin (home) whenever it has a session.
         if jfActive { return .jellyfin }
+        if ytActive { return .youtube }
         return current
     }
 

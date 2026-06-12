@@ -98,6 +98,26 @@ struct SourceArbiterTests {
         ) == .jellyfin)
     }
 
+    /// Neither source playing → fall back to Jellyfin (the home source) when it
+    /// has a session, so pausing/stopping YouTube reveals Jellyfin instead of
+    /// lingering on a paused YouTube — even though YouTube was active and
+    /// activated more recently. With no Jellyfin session, a paused YouTube keeps
+    /// the overlay.
+    @Test
+    func autoFallsBackToJellyfinWhenNeitherPlaying() {
+        #expect(SourceArbiter.decide(
+            selection: .auto, ytPlaying: false, ytActive: true,   // YouTube paused
+            jfPlaying: false, jfActive: true,                     // Jellyfin paused
+            ytActivatedNoOlderThanJf: true, current: .youtube
+        ) == .jellyfin)
+
+        #expect(SourceArbiter.decide(
+            selection: .auto, ytPlaying: false, ytActive: true,
+            jfPlaying: false, jfActive: false,                    // no Jellyfin session
+            ytActivatedNoOlderThanJf: true, current: .youtube
+        ) == .youtube)
+    }
+
     // MARK: - Activation recency (auto-advance must not steal focus)
 
     /// The source that activated last wins the tie. Starting YouTube after
