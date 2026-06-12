@@ -114,12 +114,19 @@ final class SourceArbiter {
         // Publish the YouTube snapshot only when YouTube is the winner and the
         // wake was YouTube's own (or a selection change) — Jellyfin writes its
         // own state through `ingest`.
+        //
+        // Always publish as `.connected`, never `.idle`: `.idle` is Jellyfin's
+        // "not configured" state and the overlay renders it as the "Configure
+        // your Jellyfin server" prompt. When YouTube is the active source but
+        // has nothing playing (bridge dormant / paused tab gone), we want the
+        // ambient "nothing playing" view (`.connected` + no track), not a false
+        // Jellyfin-misconfiguration alarm.
         if kind == .youtube, trigger != .jellyfin {
             player.applyExternalSnapshot(
                 track: yt.track,
                 isPaused: yt.isPaused,
                 volume: yt.volume,
-                connection: yt.active ? .connected : .idle
+                connection: .connected
             )
         }
     }
@@ -127,30 +134,46 @@ final class SourceArbiter {
     private func resolveActiveKind(yt: ExternalPlayback) -> SourceKind {
         Self.decide(
             selection: settings.sourceSelection,
+            ytPlaying: yt.active && !yt.isPaused,
             ytActive: yt.active,
+            jfPlaying: player.jellyfinIsPlaying,
             jfActive: player.jellyfinHasNowPlaying,
             ytActivatedNoOlderThanJf: recency.ytActivatedNoOlderThanJf,
             current: activeKind
         )
     }
 
-    /// Pure decision policy (extracted for testing). A forced selection wins
-    /// outright; in `auto` the active source drives, ties (both active) go to
-    /// the most-recently-*activated* (the source the user started last), and with
-    /// neither active the current source stays put.
+    /// Pure decision policy (extracted for testing). In order:
+    /// 1. A forced selection wins outright.
+    /// 2. Exactly one source genuinely *playing* → it wins (over an idle/paused
+    ///    other). Resolves the common "Jellyfin parked while YouTube plays".
+    /// 3. Both playing → most-recently-*activated* (the source the user started
+    ///    last); auto-advance can't steal because it never re-activates.
+    /// 4. Neither playing → fall back to Jellyfin (the home source) whenever it
+    ///    has a session at all, so pausing/stopping YouTube reveals Jellyfin
+    ///    instead of lingering on a paused YouTube cover. YouTube only holds the
+    ///    overlay here when it is the *only* source present.
+    /// 5. With neither active, the current source stays put.
     static func decide(
         selection: SourceSelection,
+        ytPlaying: Bool,
         ytActive: Bool,
+        jfPlaying: Bool,
         jfActive: Bool,
         ytActivatedNoOlderThanJf: Bool,
         current: SourceKind
     ) -> SourceKind {
         if let forced = selection.forcedKind { return forced }
-        if ytActive && jfActive {
+        // Exactly one genuinely playing → it wins.
+        if ytPlaying && !jfPlaying { return .youtube }
+        if jfPlaying && !ytPlaying { return .jellyfin }
+        // Both playing → most-recently-activated (auto-advance can't steal).
+        if ytPlaying && jfPlaying {
             return ytActivatedNoOlderThanJf ? .youtube : .jellyfin
         }
-        if ytActive { return .youtube }
+        // Neither playing: prefer Jellyfin (home) whenever it has a session.
         if jfActive { return .jellyfin }
+        if ytActive { return .youtube }
         return current
     }
 

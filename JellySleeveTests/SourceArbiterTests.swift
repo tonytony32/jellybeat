@@ -12,12 +12,14 @@ struct SourceArbiterTests {
     @Test
     func forcedSelectionWinsOutright() {
         #expect(SourceArbiter.decide(
-            selection: .jellyfin, ytActive: true, jfActive: false,
+            selection: .jellyfin, ytPlaying: true, ytActive: true,
+            jfPlaying: false, jfActive: false,
             ytActivatedNoOlderThanJf: true, current: .youtube
         ) == .jellyfin)
 
         #expect(SourceArbiter.decide(
-            selection: .youtube, ytActive: false, jfActive: true,
+            selection: .youtube, ytPlaying: false, ytActive: false,
+            jfPlaying: true, jfActive: true,
             ytActivatedNoOlderThanJf: false, current: .jellyfin
         ) == .youtube)
     }
@@ -26,31 +28,56 @@ struct SourceArbiterTests {
     @Test
     func autoPicksTheActiveSource() {
         #expect(SourceArbiter.decide(
-            selection: .auto, ytActive: true, jfActive: false,
+            selection: .auto, ytPlaying: true, ytActive: true,
+            jfPlaying: false, jfActive: false,
             ytActivatedNoOlderThanJf: false, current: .jellyfin
         ) == .youtube)
 
         #expect(SourceArbiter.decide(
-            selection: .auto, ytActive: false, jfActive: true,
+            selection: .auto, ytPlaying: false, ytActive: false,
+            jfPlaying: true, jfActive: true,
             ytActivatedNoOlderThanJf: true, current: .youtube
         ) == .jellyfin)
     }
 
-    /// In auto with both active, the most-recently-*activated* source wins (the
-    /// one the user started last). Auto-advance keeps a source continuously
-    /// active without re-activating it, so it never bumps this signal — the
-    /// arbiter's activation-edge tracking (not exercised here) is what guarantees
-    /// a background playlist can't steal focus; this test pins the consumption of
-    /// that signal.
+    /// A genuinely playing source beats one that is active but paused — even when
+    /// the paused one activated more recently (so the tie-break alone would pick
+    /// it). This is THE fix for "YouTube is playing but the overlay stays on a
+    /// paused Jellyfin".
+    @Test
+    func autoPrefersPlayingOverPaused() {
+        #expect(SourceArbiter.decide(
+            selection: .auto, ytPlaying: true, ytActive: true,
+            jfPlaying: false, jfActive: true,       // Jellyfin present but paused
+            ytActivatedNoOlderThanJf: false,        // Jellyfin activated later
+            current: .jellyfin
+        ) == .youtube)
+
+        #expect(SourceArbiter.decide(
+            selection: .auto, ytPlaying: false, ytActive: true,  // YouTube paused
+            jfPlaying: true, jfActive: true,
+            ytActivatedNoOlderThanJf: true,
+            current: .youtube
+        ) == .jellyfin)
+    }
+
+    /// In auto with both genuinely playing, the most-recently-*activated* source
+    /// wins (the one the user started last). Auto-advance keeps a source
+    /// continuously active without re-activating it, so it never bumps this
+    /// signal — the arbiter's activation-edge tracking (not exercised here) is
+    /// what guarantees a background playlist can't steal focus; this test pins
+    /// the consumption of that signal.
     @Test
     func autoBreaksTiesByActivationRecency() {
         #expect(SourceArbiter.decide(
-            selection: .auto, ytActive: true, jfActive: true,
+            selection: .auto, ytPlaying: true, ytActive: true,
+            jfPlaying: true, jfActive: true,
             ytActivatedNoOlderThanJf: true, current: .jellyfin
         ) == .youtube)
 
         #expect(SourceArbiter.decide(
-            selection: .auto, ytActive: true, jfActive: true,
+            selection: .auto, ytPlaying: true, ytActive: true,
+            jfPlaying: true, jfActive: true,
             ytActivatedNoOlderThanJf: false, current: .youtube
         ) == .jellyfin)
     }
@@ -59,14 +86,36 @@ struct SourceArbiterTests {
     @Test
     func autoKeepsCurrentWhenNeitherActive() {
         #expect(SourceArbiter.decide(
-            selection: .auto, ytActive: false, jfActive: false,
+            selection: .auto, ytPlaying: false, ytActive: false,
+            jfPlaying: false, jfActive: false,
             ytActivatedNoOlderThanJf: true, current: .youtube
         ) == .youtube)
 
         #expect(SourceArbiter.decide(
-            selection: .auto, ytActive: false, jfActive: false,
+            selection: .auto, ytPlaying: false, ytActive: false,
+            jfPlaying: false, jfActive: false,
             ytActivatedNoOlderThanJf: false, current: .jellyfin
         ) == .jellyfin)
+    }
+
+    /// Neither source playing → fall back to Jellyfin (the home source) when it
+    /// has a session, so pausing/stopping YouTube reveals Jellyfin instead of
+    /// lingering on a paused YouTube — even though YouTube was active and
+    /// activated more recently. With no Jellyfin session, a paused YouTube keeps
+    /// the overlay.
+    @Test
+    func autoFallsBackToJellyfinWhenNeitherPlaying() {
+        #expect(SourceArbiter.decide(
+            selection: .auto, ytPlaying: false, ytActive: true,   // YouTube paused
+            jfPlaying: false, jfActive: true,                     // Jellyfin paused
+            ytActivatedNoOlderThanJf: true, current: .youtube
+        ) == .jellyfin)
+
+        #expect(SourceArbiter.decide(
+            selection: .auto, ytPlaying: false, ytActive: true,
+            jfPlaying: false, jfActive: false,                    // no Jellyfin session
+            ytActivatedNoOlderThanJf: true, current: .youtube
+        ) == .youtube)
     }
 
     // MARK: - Activation recency (auto-advance must not steal focus)
