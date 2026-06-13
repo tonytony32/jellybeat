@@ -176,13 +176,14 @@ struct SourceArbiterTests {
         positionSec: Double? = 30,
         videoId: String? = "abc123",
         artworkUrl: String? = "https://i.ytimg.com/vi/abc123/hq.jpg",
-        volume: Double? = 0.8
+        volume: Double? = 0.8,
+        liked: Bool? = nil
     ) -> BridgeSnapshot {
         BridgeSnapshot(
             active: active, source: "youtube_music", state: state, title: title,
             artist: artist, album: album, durationSec: durationSec,
             positionSec: positionSec, videoId: videoId, artworkUrl: artworkUrl,
-            volume: volume, updatedAtMs: 1
+            volume: volume, liked: liked, updatedAtMs: 1
         )
     }
 
@@ -200,6 +201,15 @@ struct SourceArbiterTests {
         #expect(track?.runtime == .seconds(240))
         #expect(track?.position == .seconds(30))
         #expect(track?.artworkURL?.absoluteString == "https://i.ytimg.com/vi/abc123/hq.jpg")
+    }
+
+    /// The bridge's `liked` drives the favorite (thumbs-up) state: true → favorited,
+    /// and a missing/unknown `liked` is a safe `false` rather than nil.
+    @Test
+    func mapsLikedState() {
+        #expect(YouTubeBridgeFeed.map(snapshot(liked: true)).track?.isFavorite == true)
+        #expect(YouTubeBridgeFeed.map(snapshot(liked: false)).track?.isFavorite == false)
+        #expect(YouTubeBridgeFeed.map(snapshot(liked: nil)).track?.isFavorite == false)
     }
 
     /// `state == "paused"` maps to `isPaused`.

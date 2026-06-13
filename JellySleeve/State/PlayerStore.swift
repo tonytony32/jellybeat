@@ -165,6 +165,11 @@ final class PlayerStore {
     private var favoriteRefreshTask: Task<Void, Never>?
     /// True while a favorite toggle request is in flight, to drop double-clicks.
     private var favoriteInFlight: Bool = false
+    /// Timestamp of the last local favorite toggle. For a source whose poll
+    /// carries an authoritative favorite (the YouTube bridge's `liked`), the poll
+    /// is ignored for this field briefly after a toggle so the optimistic flip
+    /// doesn't snap back before the bridge has clicked the button and re-reported.
+    private var lastFavoriteCommandAt: Date?
     private var anticipatingTask: Task<Void, Never>?
     private var commandFeedbackTask: Task<Void, Never>?
     private var volumeFeedbackTask: Task<Void, Never>?
@@ -194,6 +199,11 @@ final class PlayerStore {
     /// local optimistic value. Covers the debounce plus a round-trip margin so
     /// the readout doesn't flicker back to a stale level mid-scroll.
     private static let optimisticVolumeWindow: TimeInterval = 2.0
+    /// Window during which a poll's authoritative favorite is ignored in favour
+    /// of the local optimistic flip. Sized for the bridge's worst case: our
+    /// command queues, the next Safari sync (≤1 s) clicks the button, and the
+    /// following now-playing read carries the new `liked`.
+    private static let optimisticFavoriteWindow: TimeInterval = 2.5
     /// How long to wait before clearing `currentTrack` when a poll reports no
     /// active track. Smooths over the brief gap between songs while the web
     /// player loads the next one.
@@ -236,7 +246,8 @@ final class PlayerStore {
         isPaused: Bool,
         volume: Int?,
         sessions: [SessionSummary],
-        queue: [QueueItem] = []
+        queue: [QueueItem] = [],
+        trustFavorite: Bool = false
     ) {
         if self.connectionState != connectionState { self.connectionState = connectionState }
         // Optimistic-update protection: if a command was issued in the last
@@ -268,14 +279,22 @@ final class PlayerStore {
         if let track {
             clearTrackTask?.cancel()
             clearTrackTask = nil
-            // Favorite state is NOT trusted from the poll: `/Sessions` does not
-            // reliably embed `UserData`, so a fresh snapshot for the same item
-            // would otherwise stomp a just-toggled heart back to false. Carry
-            // the known value across polls; only re-fetch it when the item
-            // actually changes (below).
+            // Favorite handling depends on the source. Jellyfin's poll can't be
+            // trusted for it (`/Sessions` doesn't reliably embed `UserData`), so we
+            // carry the known value across polls and re-fetch on track change. The
+            // YouTube bridge, by contrast, reports an authoritative `liked` every
+            // poll (`trustFavorite`), which also reflects likes made directly in
+            // the browser — so we take it, except briefly after a local toggle
+            // where the optimistic flip should win until the bridge catches up.
             let isNewItem = currentTrack?.itemId != track.itemId
             if let existing = currentTrack, existing.itemId == track.itemId {
-                currentTrack = track.withFavorite(existing.isFavorite)
+                let recentlyToggled = lastFavoriteCommandAt
+                    .map { Date().timeIntervalSince($0) < Self.optimisticFavoriteWindow }
+                    ?? false
+                let favorite = (trustFavorite && !recentlyToggled)
+                    ? track.isFavorite
+                    : existing.isFavorite
+                currentTrack = track.withFavorite(favorite)
             } else {
                 currentTrack = track
             }
@@ -287,7 +306,9 @@ final class PlayerStore {
                 // The mix was seeded from the previous song; drop it so the
                 // panel rebuilds recommendations for the new track on demand.
                 resetInstantMix()
-                refreshFavorite(for: track.itemId)
+                // Only Jellyfin needs the authoritative re-fetch; the bridge
+                // already delivers a trusted `liked` in the snapshot above.
+                if !trustFavorite { refreshFavorite(for: track.itemId) }
             }
         } else if currentTrack != nil {
             clearTrackTask?.cancel()
@@ -304,9 +325,10 @@ final class PlayerStore {
     /// Apply a snapshot from a non-Jellyfin source (the YouTube bridge), routed
     /// through the same `apply(...)` path so the optimistic-update protection
     /// for local play/pause and volume changes applies identically. Carries no
-    /// sessions or queue (those are Jellyfin concepts); favorites are inert
-    /// because the YouTube command sink reports them unsupported and the heart
-    /// UI is hidden via `capabilities`.
+    /// sessions or queue (those are Jellyfin concepts). Favorites are trusted
+    /// from the snapshot (`trustFavorite`): the bridge reports an authoritative
+    /// `liked` each poll, so a like made in JellySleeve *or* directly in the
+    /// browser stays in sync.
     func applyExternalSnapshot(
         track: TrackSnapshot?,
         isPaused: Bool,
@@ -319,7 +341,8 @@ final class PlayerStore {
             isPaused: isPaused,
             volume: volume,
             sessions: [],
-            queue: []
+            queue: [],
+            trustFavorite: true
         )
     }
 
@@ -835,8 +858,11 @@ final class PlayerStore {
 
         let target = !current.isFavorite
 
-        // Optimistic flip; the heart stays put because the poll no longer
-        // overwrites favorite state (see `apply`).
+        // Optimistic flip. For Jellyfin the poll never overwrites favorite state;
+        // for the YouTube bridge (whose poll *is* authoritative) this timestamp
+        // suppresses the poll for `optimisticFavoriteWindow` so the flip holds
+        // until the bridge has clicked the button and re-reported `liked`.
+        lastFavoriteCommandAt = Date()
         currentTrack = current.withFavorite(target)
 
         do {

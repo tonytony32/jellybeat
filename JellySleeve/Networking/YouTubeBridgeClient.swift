@@ -21,6 +21,7 @@ nonisolated struct BridgeSnapshot: Decodable, Equatable, Sendable {
     let videoId: String?
     let artworkUrl: String?
     let volume: Double?         // 0.0–1.0
+    let liked: Bool?            // like / me gusta state; null = unknown
     let updatedAtMs: Double?
 
     var isPlaying: Bool { state == "playing" }
@@ -113,7 +114,9 @@ nonisolated struct YouTubeBridgeClient: Sendable, PlaybackCommanding {
             canSeek: caps.canSeek ?? true,
             canSetVolume: caps.canSetVolume ?? true,
             hasFavorites: caps.hasFavorites ?? false,
-            hasQueue: caps.hasQueue ?? false
+            hasQueue: caps.hasQueue ?? false,
+            // The bridge's favorite is always YouTube's "like" — render a thumbs-up.
+            favoriteStyle: .like
         )
     }
 
@@ -132,10 +135,16 @@ nonisolated struct YouTubeBridgeClient: Sendable, PlaybackCommanding {
         try await command("setVolume", value: Double(clamped) / 100.0)
     }
 
-    /// YouTube has no favorites — report unsupported so the heart UI stays
-    /// hidden and `PlayerStore` keeps its optimistic state untouched.
+    /// Toggle YouTube's "like" for the current video. We send the idempotent
+    /// `like`/`unlike` (the bridge no-ops if already in that state) rather than a
+    /// blind toggle, so a stale `current` can't double-flip. The command is
+    /// best-effort/async on the bridge side, so we optimistically report the
+    /// target value; the authoritative `liked` arrives in a later now-playing
+    /// poll (which `PlayerStore` trusts for this source).
     func toggleFavorite(itemId: String, current: Bool) async throws -> Bool? {
-        nil
+        let target = !current
+        try await command(target ? "like" : "unlike")
+        return target
     }
 
     // MARK: - Internals

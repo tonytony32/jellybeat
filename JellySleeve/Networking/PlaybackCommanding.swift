@@ -35,20 +35,33 @@ nonisolated struct SourceCapabilities: Equatable, Sendable {
     var canSetVolume: Bool
     var hasFavorites: Bool
     var hasQueue: Bool
+    /// How the "favorite" affordance should read for this source — a library
+    /// favorite (Jellyfin → heart) vs. a YouTube "like" (thumbs-up). Lets the
+    /// overlay pick the right glyph without knowing the concrete backend.
+    var favoriteStyle: FavoriteStyle = .heart
 
-    /// Jellyfin: full transport control plus favorites and a play queue.
+    /// Jellyfin: full transport control plus favorites (a heart) and a play queue.
     static let jellyfin = SourceCapabilities(
         canPlayPause: true, canNext: true, canPrevious: true,
-        canSeek: true, canSetVolume: true, hasFavorites: true, hasQueue: true
+        canSeek: true, canSetVolume: true, hasFavorites: true, hasQueue: true,
+        favoriteStyle: .heart
     )
 
-    /// YouTube bridge default: full transport control, no favorites, no queue.
-    /// Used as the immediate fallback before `/v1/health` is read (the bridge
-    /// reports these as constants anyway).
+    /// YouTube bridge default: full transport control and favorites (the "like",
+    /// a thumbs-up), no queue. Used as the immediate fallback before `/v1/health`
+    /// is read (the bridge reports these as constants anyway).
     static let youtube = SourceCapabilities(
         canPlayPause: true, canNext: true, canPrevious: true,
-        canSeek: true, canSetVolume: true, hasFavorites: false, hasQueue: false
+        canSeek: true, canSetVolume: true, hasFavorites: true, hasQueue: false,
+        favoriteStyle: .like
     )
+}
+
+/// Presentation style for a source's favorite affordance: a heart for a library
+/// favorite (Jellyfin), a thumbs-up for a YouTube "like / me gusta".
+nonisolated enum FavoriteStyle: Sendable, Equatable {
+    case heart
+    case like
 }
 
 /// Which backend is currently driving the overlay. Used by the arbiter and the

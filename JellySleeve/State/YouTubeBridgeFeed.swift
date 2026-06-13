@@ -117,7 +117,7 @@ final class YouTubeBridgeFeed {
             runtime: runtime,
             position: position,
             sessionId: "",                    // unused for YouTube commands
-            isFavorite: false,
+            isFavorite: snapshot.liked ?? false,
             artworkURL: Self.safeArtworkURL(snapshot.artworkUrl)
         )
 
