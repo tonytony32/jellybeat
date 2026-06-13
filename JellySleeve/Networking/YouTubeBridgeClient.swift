@@ -113,7 +113,10 @@ nonisolated struct YouTubeBridgeClient: Sendable, PlaybackCommanding {
             canSeek: caps.canSeek ?? true,
             canSetVolume: caps.canSetVolume ?? true,
             hasFavorites: caps.hasFavorites ?? false,
-            hasQueue: caps.hasQueue ?? false
+            hasQueue: caps.hasQueue ?? false,
+            // Absent on older bridges that predate the command → stay false so
+            // the artwork's focus affordance only lights up when supported.
+            canFocusTab: caps.canFocusTab ?? false
         )
     }
 
@@ -138,6 +141,14 @@ nonisolated struct YouTubeBridgeClient: Sendable, PlaybackCommanding {
         nil
     }
 
+    /// Raise the Safari tab+window that's playing. `focusTab` carries no value.
+    /// Best-effort: the bridge replies `202` and delivers it to Safari on its
+    /// next sync (≤ ~1 s); `503`/`409` (stale/no active player) surface as a
+    /// transport error the caller swallows, and a refused connection is the
+    /// normal idle state (`command` lets the `URLError` propagate for the
+    /// caller to treat as idle).
+    func focusTab() async throws { try await command("focusTab") }
+
     // MARK: - Internals
 
     private struct HealthEnvelope: Decodable, Sendable {
@@ -150,6 +161,7 @@ nonisolated struct YouTubeBridgeClient: Sendable, PlaybackCommanding {
             let canSetVolume: Bool?
             let hasFavorites: Bool?
             let hasQueue: Bool?
+            let canFocusTab: Bool?
         }
     }
 

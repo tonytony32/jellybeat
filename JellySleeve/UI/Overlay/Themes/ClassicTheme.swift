@@ -61,7 +61,9 @@ private struct ClassicBody: View {
                 size: theme.layout.artworkSize ?? 120,
                 cornerRadius: 6,
                 shadowOpacity: theme.behavior.shadowOpacity,
-                artworkURL: track.artworkURL
+                artworkURL: track.artworkURL,
+                canFocusTab: store.capabilities.canFocusTab,
+                onFocus: { Task { @MainActor in await store.focusSource() } }
             )
 
             VStack(alignment: .leading, spacing: 4) {

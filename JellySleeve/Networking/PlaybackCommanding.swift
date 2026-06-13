@@ -21,6 +21,12 @@ nonisolated protocol PlaybackCommanding: Sendable {
     /// Toggle the favorite flag for `itemId`. Returns the server's resulting
     /// value, or `nil` when the source has no concept of favorites (YouTube).
     func toggleFavorite(itemId: String, current: Bool) async throws -> Bool?
+    /// Bring the source's window/tab to the foreground (the YouTube bridge's
+    /// `focusTab`). Best-effort and asynchronous; sources that can't surface a
+    /// window (Jellyfin) implement it as a no-op. Capability-gated in the UI by
+    /// `SourceCapabilities.canFocusTab`, so it's only invoked on a source that
+    /// advertises it.
+    func focusTab() async throws
 }
 
 /// Self-describing feature set of a playback source, mirrored from the
@@ -35,19 +41,29 @@ nonisolated struct SourceCapabilities: Equatable, Sendable {
     var canSetVolume: Bool
     var hasFavorites: Bool
     var hasQueue: Bool
+    /// The source can raise its own window/tab to the foreground (the bridge's
+    /// `focusTab`). Drives the artwork's "double-click to go to the tab"
+    /// affordance. False for sources that don't advertise it (Jellyfin, older
+    /// bridges, future non-YouTube sources), so the affordance stays hidden.
+    var canFocusTab: Bool = false
 
-    /// Jellyfin: full transport control plus favorites and a play queue.
+    /// Jellyfin: full transport control plus favorites and a play queue. No
+    /// tab to focus — the overlay's double-click opens the Jellyfin client
+    /// instead.
     static let jellyfin = SourceCapabilities(
         canPlayPause: true, canNext: true, canPrevious: true,
-        canSeek: true, canSetVolume: true, hasFavorites: true, hasQueue: true
+        canSeek: true, canSetVolume: true, hasFavorites: true, hasQueue: true,
+        canFocusTab: false
     )
 
     /// YouTube bridge default: full transport control, no favorites, no queue.
-    /// Used as the immediate fallback before `/v1/health` is read (the bridge
-    /// reports these as constants anyway).
+    /// Used as the immediate fallback before `/v1/health` is read; `canFocusTab`
+    /// stays conservatively `false` until health confirms the source supports
+    /// it (older bridges won't advertise the capability).
     static let youtube = SourceCapabilities(
         canPlayPause: true, canNext: true, canPrevious: true,
-        canSeek: true, canSetVolume: true, hasFavorites: false, hasQueue: false
+        canSeek: true, canSetVolume: true, hasFavorites: false, hasQueue: false,
+        canFocusTab: false
     )
 }
 
@@ -81,6 +97,11 @@ nonisolated struct JellyfinCommandSink: PlaybackCommanding {
     func toggleFavorite(itemId: String, current: Bool) async throws -> Bool? {
         try await client.setFavorite(itemId: itemId, isFavorite: !current)
     }
+
+    /// Jellyfin has no window to raise from here — no-op. The overlay never
+    /// invokes this (Jellyfin's `canFocusTab` is false); the artwork's
+    /// double-click opens the Jellyfin client through a separate path.
+    func focusTab() async throws {}
 }
 
 extension Duration {
