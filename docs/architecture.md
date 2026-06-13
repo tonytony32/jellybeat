@@ -127,19 +127,29 @@ Jellyfin ingest (`player.onJellyfinUpdate`), and a `sourceSelection` change.
 
 ### Decision policy (pure, tested: `SourceArbiter.decide`)
 
+Generalized over an arbitrary set of sources keyed by `SourceKind` (today:
+Jellyfin + YouTube), evaluated in order:
+
 ```
-forced selection            → that source
-auto, both active           → most-recently-ACTIVATED source
-auto, one active            → that source
-auto, neither active        → keep current (last source)
+forced selection              → that source
+auto, exactly one playing     → that source
+auto, several playing         → most-recently-ACTIVATED (tie → tiePriority)
+auto, none playing            → first present source in homePriority
+auto, nothing active          → keep current (last source)
 ```
 
+- **Two explicit priority lists, not one.** `homePriority` (`[.jellyfin,
+  .youtube]`) picks the fallback when nothing is playing — so pausing YouTube
+  reveals Jellyfin, the "home" source. `tiePriority` (`[.youtube, .jellyfin]`)
+  breaks an equal-rank both-playing tie in YouTube's favor. The two answers
+  genuinely differ, so they're separate orderings, not derived from one list.
 - **Most-recently-activated, not -changed.** Recency is bumped only on a
-  source's **idle→active edge** (the user *starting* it), tracked by the pure
-  `ActivationRecency` value type. A source that stays continuously active —
-  e.g. a Jellyfin playlist **auto-advancing** in the background — never
-  re-activates, so it cannot out-rank and **steal** the overlay from what the
-  user is actually watching. Deliberately starting a source still wins.
+  source's **idle→active edge** (the user *starting* it), tracked by the pure,
+  N-source `ActivationRecency` (a monotonic-tick rank per `SourceKind`). A source
+  that stays continuously active — e.g. a Jellyfin playlist **auto-advancing** in
+  the background — never re-activates, so it cannot out-rank and **steal** the
+  overlay from what the user is actually watching. Deliberately starting a source
+  still wins.
 - **Flip debounce.** A *tie-break* flip (both active) landing within 1 s of the
   last flip is suppressed to damp oscillation. A forced selection, or the
   current source going idle, flips immediately.
@@ -153,7 +163,7 @@ feeds keep running** and the arbiter gates *writes*:
 - `PlayerStore.jellyfinIsActiveSource` (default `true`) — when `false`,
   Jellyfin's `ingest` and `updateConnection` writes are dropped, but `ingest`
   still refreshes the **presence signals** (`jellyfinHasNowPlaying`,
-  `jellyfinNowPlayingId`) and fires `onJellyfinUpdate`. So Jellyfin's liveness
+  `jellyfinIsPlaying`) and fires `onJellyfinUpdate`. So Jellyfin's liveness
   stays observable even while YouTube drives.
 - When YouTube wins, the arbiter writes its snapshot via
   `PlayerStore.applyExternalSnapshot(...)` (reusing the same optimistic-update
@@ -177,7 +187,7 @@ vocabulary. Notable seams added for multi-source:
 | `commandSink` | active source's transport sink |
 | `client: JellyfinClient?` | Jellyfin-only ops (mix, queue jump, favorite read) |
 | `jellyfinIsActiveSource` | arbiter gate (see §5) |
-| `jellyfinHasNowPlaying` / `jellyfinNowPlayingId` | presence signals for the arbiter |
+| `jellyfinHasNowPlaying` / `jellyfinIsPlaying` | presence signals for the arbiter |
 | `onJellyfinUpdate` | arbiter re-evaluation callback |
 | `applyExternalSnapshot(...)` | external (YouTube) write path |
 | `ingest(sessions:userId:)` | Jellyfin write path (gated) |
@@ -222,11 +232,17 @@ To add a backend (e.g. Spotify, MPRIS) as a `PlaybackSource`:
    adapter) and reporting a `SourceCapabilities`.
 2. Produce a normalized `ExternalPlayback` (a `TrackSnapshot` + active/pause/
    volume), via a `@MainActor` feed analogous to `YouTubeBridgeFeed`.
-3. Extend `SourceKind` / `SourceSelection`, teach `SourceArbiter` to weigh the
-   new feed (activation recency generalizes), and add a menu option.
+3. Add a `SourceKind` case (+ `SourceSelection`), slot the source into
+   `homePriority` / `tiePriority`, sample its presence into the arbiter's
+   per-pass `[SourceKind: SourcePresence]` map, and add one `applyKind` arm to
+   swap in its command sink. `decide` and `ActivationRecency` already generalize
+   over `SourceKind.allCases`, so the decision core needs no change. Add a menu
+   option.
 
-The arbiter's gating and the capability-driven UI generalize without touching
-the Jellyfin transport.
+The arbiter's decision logic, gating, and the capability-driven UI generalize
+without touching the Jellyfin transport. (The per-source `applyKind` sink-swap
+arm is the one spot still enumerated by kind — deliberately, until a real third
+source justifies a registry abstraction.)
 
 ## 11. Tests
 

@@ -147,11 +147,6 @@ final class PlayerStore {
     /// that is genuinely playing over one merely parked/paused.
     private(set) var jellyfinIsPlaying: Bool = false
 
-    /// Item id of the current Jellyfin pick (even while gated), so the arbiter
-    /// can tell when Jellyfin's playback *changed* for most-recently-changed
-    /// arbitration.
-    private(set) var jellyfinNowPlayingId: String?
-
     /// Called after every Jellyfin `ingest` so the arbiter can re-evaluate which
     /// source should drive, using the refreshed presence signal above.
     var onJellyfinUpdate: (@MainActor () -> Void)?
@@ -426,7 +421,6 @@ final class PlayerStore {
         // drives.
         jellyfinHasNowPlaying = snapshot != nil
         jellyfinIsPlaying = snapshot != nil && !pausedFromServer
-        jellyfinNowPlayingId = snapshot?.itemId
         onJellyfinUpdate?()
 
         // Gated: YouTube is the active source, so don't let Jellyfin write the
