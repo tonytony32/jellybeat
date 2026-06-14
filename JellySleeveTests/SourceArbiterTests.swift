@@ -3,8 +3,8 @@ import Testing
 @testable import JellySleeve
 
 /// Tests for the arbiter's pure decision policy (`SourceArbiter.decide`), the
-/// generalized `ActivationRecency`, and the YouTube bridge → normalized snapshot
-/// mapping (`YouTubeBridgeFeed.map`).
+/// generalized `ActivationRecency`, and the loopback source → normalized snapshot
+/// mapping (`LoopbackSourceFeed.map`).
 struct SourceArbiterTests {
 
     // MARK: - Helpers
@@ -23,7 +23,7 @@ struct SourceArbiterTests {
         r.observe([
             .youtube: SourcePresence(active: yt, playing: false),
             .jellyfin: SourcePresence(active: jf, playing: false),
-        ])
+        ], order: [.jellyfin, .youtube])
     }
 
     /// True when YouTube activated no earlier than Jellyfin — the property the
@@ -46,7 +46,13 @@ struct SourceArbiterTests {
         return r
     }
 
-    /// Run `decide` with the production priority orderings.
+    /// The built-in priority orderings. A registry with only the two built-ins
+    /// yields exactly these (pinned by `SourceRegistryTests`); `decide` is a pure
+    /// function over them, so these tests supply them directly.
+    private let homePriority: [SourceID] = [.jellyfin, .youtube]
+    private let tiePriority: [SourceID] = [.youtube, .jellyfin]
+
+    /// Run `decide` with the built-in priority orderings.
     private func autoDecide(
         _ presence: [SourceKind: SourcePresence],
         recency: ActivationRecency = ActivationRecency(),
@@ -54,8 +60,8 @@ struct SourceArbiterTests {
     ) -> SourceKind {
         SourceArbiter.decide(
             selection: .auto, presence: presence, recency: recency,
-            homePriority: SourceArbiter.homePriority,
-            tiePriority: SourceArbiter.tiePriority,
+            homePriority: homePriority,
+            tiePriority: tiePriority,
             current: current
         )
     }
@@ -90,7 +96,7 @@ struct SourceArbiterTests {
         )
         #expect(SourceArbiter.decide(
             selection: .jellyfin, presence: p, recency: ActivationRecency(),
-            homePriority: SourceArbiter.homePriority, tiePriority: SourceArbiter.tiePriority,
+            homePriority: homePriority, tiePriority: tiePriority,
             current: .youtube
         ) == .jellyfin)
 
@@ -100,7 +106,7 @@ struct SourceArbiterTests {
         )
         #expect(SourceArbiter.decide(
             selection: .youtube, presence: q, recency: ActivationRecency(),
-            homePriority: SourceArbiter.homePriority, tiePriority: SourceArbiter.tiePriority,
+            homePriority: homePriority, tiePriority: tiePriority,
             current: .jellyfin
         ) == .youtube)
     }
@@ -200,12 +206,12 @@ struct SourceArbiterTests {
         )
         #expect(SourceArbiter.decide(
             selection: .auto, presence: bothPaused, recency: ActivationRecency(),
-            homePriority: [.jellyfin, .youtube], tiePriority: SourceArbiter.tiePriority,
+            homePriority: [.jellyfin, .youtube], tiePriority: tiePriority,
             current: .youtube
         ) == .jellyfin)
         #expect(SourceArbiter.decide(
             selection: .auto, presence: bothPaused, recency: ActivationRecency(),
-            homePriority: [.youtube, .jellyfin], tiePriority: SourceArbiter.tiePriority,
+            homePriority: [.youtube, .jellyfin], tiePriority: tiePriority,
             current: .youtube
         ) == .youtube)
     }
@@ -221,12 +227,12 @@ struct SourceArbiterTests {
         )
         #expect(SourceArbiter.decide(
             selection: .auto, presence: bothPlaying, recency: ActivationRecency(),
-            homePriority: SourceArbiter.homePriority, tiePriority: [.youtube, .jellyfin],
+            homePriority: homePriority, tiePriority: [.youtube, .jellyfin],
             current: .jellyfin
         ) == .youtube)
         #expect(SourceArbiter.decide(
             selection: .auto, presence: bothPlaying, recency: ActivationRecency(),
-            homePriority: SourceArbiter.homePriority, tiePriority: [.jellyfin, .youtube],
+            homePriority: homePriority, tiePriority: [.jellyfin, .youtube],
             current: .youtube
         ) == .jellyfin)
     }
@@ -333,11 +339,11 @@ struct SourceArbiterTests {
     }
 
     /// When both sources cross idle→active in the *same* pass, the deterministic
-    /// `SourceKind.allCases` order ([.jellyfin, .youtube]) gives Jellyfin the
-    /// lower tick and YouTube the higher — so YouTube out-ranks, consistent with
-    /// `tiePriority` favoring YouTube. (The pre-generalization code's check order
-    /// happened to favor Jellyfin in this edge case; the generalized code aligns
-    /// it with the documented tie direction.)
+    /// observe `order` (the registry's id order — here [.jellyfin, .youtube])
+    /// gives Jellyfin the lower tick and YouTube the higher — so YouTube
+    /// out-ranks, consistent with `tiePriority` favoring YouTube. (The
+    /// pre-generalization code's check order happened to favor Jellyfin in this
+    /// edge case; the generalized code aligns it with the documented tie direction.)
     @Test
     func samePassDoubleActivationFavorsYouTube() {
         var r = ActivationRecency()
@@ -349,6 +355,39 @@ struct SourceArbiterTests {
             jf: SourcePresence(active: true, playing: true)
         )
         #expect(autoDecide(both, recency: r, current: .jellyfin) == .youtube)
+    }
+
+    // MARK: - Live capability refresh on reconnect
+
+    /// A loopback source reconnecting (idle→active) while it is the active source
+    /// and no flip happened triggers a live `/health` re-read — so a rebuilt
+    /// source advertising a new capability lands without a JellySleeve restart.
+    @Test
+    func refreshesCapabilitiesOnReconnect() {
+        #expect(SourceArbiter.shouldRefreshOnReconnect(
+            sourceActive: true, sourceWasActive: false, didFlip: false, isActiveSource: true
+        ) == true)
+    }
+
+    /// It must NOT refresh in the cases the reconnect rule deliberately excludes.
+    @Test
+    func doesNotRefreshOutsideReconnectEdge() {
+        // Already active (no idle→active edge) — avoids re-fetching every poll.
+        #expect(SourceArbiter.shouldRefreshOnReconnect(
+            sourceActive: true, sourceWasActive: true, didFlip: false, isActiveSource: true
+        ) == false)
+        // A flip this pass already refreshed — don't double-fetch.
+        #expect(SourceArbiter.shouldRefreshOnReconnect(
+            sourceActive: true, sourceWasActive: false, didFlip: true, isActiveSource: true
+        ) == false)
+        // Not the active source — its capabilities aren't in play.
+        #expect(SourceArbiter.shouldRefreshOnReconnect(
+            sourceActive: true, sourceWasActive: false, didFlip: false, isActiveSource: false
+        ) == false)
+        // Going idle (active→idle), not reconnecting.
+        #expect(SourceArbiter.shouldRefreshOnReconnect(
+            sourceActive: false, sourceWasActive: true, didFlip: false, isActiveSource: true
+        ) == false)
     }
 
     // MARK: - Bridge → normalized mapping
@@ -376,7 +415,7 @@ struct SourceArbiterTests {
     /// A playing snapshot maps every field across; volume rounds 0–1 → 0–100.
     @Test
     func mapsPlayingSnapshot() {
-        let mapped = YouTubeBridgeFeed.map(snapshot())
+        let mapped = LoopbackSourceFeed.map(snapshot())
         #expect(mapped.active)
         #expect(mapped.isPaused == false)
         #expect(mapped.volume == 80)
@@ -392,7 +431,7 @@ struct SourceArbiterTests {
     /// `state == "paused"` maps to `isPaused`.
     @Test
     func mapsPausedState() {
-        let mapped = YouTubeBridgeFeed.map(snapshot(state: "paused"))
+        let mapped = LoopbackSourceFeed.map(snapshot(state: "paused"))
         #expect(mapped.isPaused == true)
         #expect(mapped.active)
     }
@@ -401,25 +440,25 @@ struct SourceArbiterTests {
     /// normalize to idle.
     @Test
     func mapsIdle() {
-        #expect(YouTubeBridgeFeed.map(nil) == .idle)
-        #expect(YouTubeBridgeFeed.map(snapshot(active: false)) == .idle)
+        #expect(LoopbackSourceFeed.map(nil) == .idle)
+        #expect(LoopbackSourceFeed.map(snapshot(active: false)) == .idle)
     }
 
     /// A non-http(s) artwork URL (e.g. `file://`) from an untrusted local source
     /// must be rejected so the artwork loader can't be turned into a file read.
     @Test
     func rejectsNonHttpArtworkURL() {
-        let fileScheme = YouTubeBridgeFeed.map(snapshot(artworkUrl: "file:///etc/passwd"))
+        let fileScheme = LoopbackSourceFeed.map(snapshot(artworkUrl: "file:///etc/passwd"))
         #expect(fileScheme.track?.artworkURL == nil)
 
-        let httpsScheme = YouTubeBridgeFeed.map(snapshot(artworkUrl: "https://i.ytimg.com/x.jpg"))
+        let httpsScheme = LoopbackSourceFeed.map(snapshot(artworkUrl: "https://i.ytimg.com/x.jpg"))
         #expect(httpsScheme.track?.artworkURL?.absoluteString == "https://i.ytimg.com/x.jpg")
     }
 
     /// A null `durationSec` (livestream / unknown) maps to a zero runtime.
     @Test
     func nullDurationMapsToZeroRuntime() {
-        let mapped = YouTubeBridgeFeed.map(snapshot(durationSec: nil))
+        let mapped = LoopbackSourceFeed.map(snapshot(durationSec: nil))
         #expect(mapped.track?.runtime == .zero)
     }
 
@@ -427,8 +466,8 @@ struct SourceArbiterTests {
     /// track-change smoothing doesn't thrash between polls.
     @Test
     func missingVideoIdUsesStableFallback() {
-        let a = YouTubeBridgeFeed.map(snapshot(videoId: nil))
-        let b = YouTubeBridgeFeed.map(snapshot(videoId: nil))
+        let a = LoopbackSourceFeed.map(snapshot(videoId: nil))
+        let b = LoopbackSourceFeed.map(snapshot(videoId: nil))
         #expect(a.track?.itemId == b.track?.itemId)
         #expect(a.track?.itemId.isEmpty == false)
     }

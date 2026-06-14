@@ -19,22 +19,22 @@ One-way dependency flow: **Networking → State → UI**. A lower layer never kn
 a higher one. App-level coordinators wire them together.
 
 ```
-App/         AppDelegate, JellySleeveApp, SourceArbiter,
+App/         AppDelegate, JellySleeveApp, SourceArbiter, SourceRegistry,
              PlaybackConnectionCoordinator, OverlayWindowController, …
 State/       PlayerStore (single source of truth), SettingsStore,
-             PlaybackPoller, YouTubeBridgeFeed, ArtworkCache
-Networking/  JellyfinClient, JellyfinSocketClient, YouTubeBridgeClient,
-             PlaybackCommanding (contract)
+             PlaybackPoller, LoopbackSourceFeed, ArtworkCache
+Networking/  JellyfinClient, JellyfinSocketClient, LoopbackSourceClient,
+             SourceManifest (+ loader), PlaybackCommanding (contract)
 UI/          OverlayView + themes + components (read PlayerStore, send commands)
 ```
 
 ### Concurrency model
 
-- `PlayerStore`, `SettingsStore`, `YouTubeBridgeFeed`, `SourceArbiter`,
-  `PlaybackConnectionCoordinator` are **`@MainActor`** (and the stores are
-  `@Observable`). The UI observes them directly — no Combine.
+- `PlayerStore`, `SettingsStore`, `LoopbackSourceFeed`, `SourceRegistry`,
+  `SourceArbiter`, `PlaybackConnectionCoordinator` are **`@MainActor`** (and the
+  stores are `@Observable`). The UI observes them directly — no Combine.
 - `PlaybackPoller` is an **`actor`**.
-- Clients (`JellyfinClient`, `YouTubeBridgeClient`) and all snapshot/contract
+- Clients (`JellyfinClient`, `LoopbackSourceClient`) and all snapshot/contract
   value types are **`nonisolated` `Sendable` structs** with `async throws`
   methods, so they cross actor boundaries freely.
 - Swift 6 strict concurrency is on: thread-safety errors are compile errors.
@@ -45,36 +45,47 @@ UI/          OverlayView + themes + components (read PlayerStore, send commands)
 > write mid-execution. The gate flag (below) just decides *whether* a write
 > happens, not against a race.
 
-## 3. The two playback feeds
+## 3. Playback feeds & the source registry
 
-JellySleeve has two independent "now-playing + remote control" feeds. Both keep
-running so each source's liveness is always observable; the arbiter decides
-which one drives the UI.
+Sources come in two flavors. All feeds keep running so each source's liveness is
+always observable; the arbiter decides which one drives the UI.
 
-### Jellyfin (existing, untouched transport)
+### Jellyfin (privileged built-in, untouched transport)
 
 `PlaybackConnectionCoordinator` owns a sophisticated transport: **WebSocket
 preferred** (`JellyfinSocketClient`) with a **polling fallback**
 (`PlaybackPoller`), reconnection/backoff, and sleep/wake handling. Both
 transports funnel decoded sessions into `PlayerStore.ingest(sessions:userId:)`,
-which runs the active-session heuristic and writes the snapshot.
+which runs the active-session heuristic and writes the snapshot. Jellyfin is the
+one **non-loopback** source and keeps this dedicated transport.
 
-### YouTube (new)
+### Loopback sources (built-in YouTube + third-party plugins)
 
-`YouTubeBridgeFeed` (`@MainActor`) polls a local Safari Web Extension —
-`yt-safari-bridge` — once a second over loopback HTTP via `YouTubeBridgeClient`.
-The bridge implements a **vendor-neutral `PlaybackSource` contract** (see the
-bridge repo's `docs/playback-source.md` / `docs/api.md`); JellySleeve codes
-against that normalized model, not against YouTube-specific shapes.
+Every other source speaks the **loopback `PlaybackSource` ABI**
+([`loopback-source-abi-v1.md`](loopback-source-abi-v1.md)) — a tiny HTTP API on a
+`127.0.0.1` port. `LoopbackSourceClient` (`nonisolated struct`, parameterized by
+`baseURL` + `pathPrefix`) is the consumer; `LoopbackSourceFeed` (`@MainActor`)
+polls it once a second, mapping each `BridgeSnapshot` → the normalized
+`ExternalPlayback` (a `TrackSnapshot` + `isPaused`/`volume`/`active`).
 
-- Endpoint base: `http://127.0.0.1:8976` (hardcoded; IP literal → exempt from
-  App Transport Security; the app is unsandboxed so no entitlement is needed).
-- A **refused connection is "idle", never an error** (Safari closed / no YT tab).
-- `GET /v1/now-playing` → `BridgeSnapshot`, mapped to the normalized
-  `ExternalPlayback` (a `TrackSnapshot` + `isPaused`/`volume`/`active`).
-- `GET /v1/health` → `SourceCapabilities` (YouTube: full transport, **no
-  favorites, no queue**).
-- `POST /v1/command` ← transport commands (`PlaybackCommanding` conformance).
+`SourceRegistry` (`@MainActor`) owns one client + feed per loopback source and
+derives the arbiter's id ordering and home/tie priorities:
+
+- **Built-in:** YouTube at `http://127.0.0.1:8976` (the `yt-safari-bridge` Safari
+  Web Extension), now expressed as a descriptor rather than a special case.
+- **Third-party:** any `*.jellysource` manifest in
+  `~/Library/Application Support/software.trypwood.jellysleeve/Sources/` (scanned
+  once at launch — see §10).
+
+Contract essentials (frozen from YouTube's behavior):
+- A **refused connection is "idle", never an error**.
+- `GET {prefix}/now-playing` → `BridgeSnapshot` → `ExternalPlayback`.
+- `GET {prefix}/health` → `SourceCapabilities` — the single source of truth for
+  what the running process supports (a manifest can't overstate it).
+- `POST {prefix}/command` ← transport commands (`PlaybackCommanding`).
+- Every string field is **untrusted page content**; artwork URLs are
+  scheme-restricted to `http`/`https`. The port is unauthenticated — accepted
+  residual risk (ABI doc §7).
 
 ## 4. The command sink (`PlaybackCommanding`)
 
@@ -96,34 +107,37 @@ protocol PlaybackCommanding: Sendable {
   a session id). Rebuilt per active session inside `PlayerStore.ingest`, so the
   captured `sessionId` always targets the mirrored device. Units: `Duration` →
   Jellyfin ticks; volume 0–100; favorites supported.
-- **`YouTubeBridgeClient`** — `toggle`/`next`/`previous` map 1:1; `seek` value =
-  seconds; `setVolume` value = percent/100; favorites return `nil`.
+- **`LoopbackSourceClient`** — `toggle`/`next`/`previous` map 1:1; `seek` value =
+  seconds; `setVolume` value = percent/100; favorites return `nil`. One instance
+  per loopback source (built-in YouTube + third-party manifests).
 
 `PlayerStore` holds a `commandSink` (transport) **and** a `client:
 JellyfinClient?` (for the Jellyfin-only operations the sink doesn't model:
 Instant Mix, queue jumps, authoritative favorite reads). The Jellyfin-only ops
-are dormant for YouTube — `capabilities` hides their UI and the arbiter gates
-the writes.
+are dormant for a loopback source — `capabilities` hides their UI and the arbiter
+gates the writes.
 
 ## 5. The arbiter (`SourceArbiter`)
 
 ```
-            ┌─────────────────────────┐
-Jellyfin ──▶│ PlaybackConnectionCoord. │──┐
-            └─────────────────────────┘  │
-                                          ├─▶ SourceArbiter ─▶ PlayerStore ─▶ UI
-            ┌─────────────────────────┐  │
-YT bridge ─▶│   YouTubeBridgeFeed (1s) │──┘
-            └─────────────────────────┘
+              ┌──────────────────────────┐
+ Jellyfin ───▶│ PlaybackConnectionCoord.  │──┐
+              └──────────────────────────┘   │
+                                              ├─▶ SourceArbiter ─▶ PlayerStore ─▶ UI
+ loopback     ┌──────────────────────────┐   │   (SourceRegistry owns one
+ sources ────▶│ LoopbackSourceFeed ×N(1s) │──┘    LoopbackSourceFeed per source)
+              └──────────────────────────┘
 ```
 
-`SourceArbiter` (`@MainActor @Observable`) owns both feeds, decides which one
-drives, and exposes `activeKind` for the menu.
+`SourceArbiter` (`@MainActor @Observable`) owns the Jellyfin coordinator and the
+registry's loopback feeds, decides which one drives, and exposes `activeKind` for
+the menu.
 
 ### Re-evaluation triggers
 
-The arbiter `reevaluate`s on: each YouTube poll (`ytFeed.onUpdate`), each
-Jellyfin ingest (`player.onJellyfinUpdate`), and a `sourceSelection` change.
+The arbiter `reevaluate`s on: each loopback poll (`feed.onUpdate` →
+`.loopback(id)`), each Jellyfin ingest (`player.onJellyfinUpdate`), and a
+`sourceSelection` change.
 
 ### Decision policy (pure, tested: `SourceArbiter.decide`)
 
@@ -224,25 +238,30 @@ scheme-restricted (§7). `fetchNowPlaying` treats connection-level failures as
 silent idle but **logs** decode/unexpected errors so a breaking bridge-schema
 change is debuggable instead of an invisible permanent "idle".
 
-## 10. Adding another source (extension point)
+## 10. Adding another source
 
-To add a backend (e.g. Spotify, MPRIS) as a `PlaybackSource`:
+A third-party **loopback source** needs **no app code change** — that's the
+point of the ABI ([`loopback-source-abi-v1.md`](loopback-source-abi-v1.md)):
 
-1. Write a client conforming to `PlaybackCommanding` (convert units in the
-   adapter) and reporting a `SourceCapabilities`.
-2. Produce a normalized `ExternalPlayback` (a `TrackSnapshot` + active/pause/
-   volume), via a `@MainActor` feed analogous to `YouTubeBridgeFeed`.
-3. Add a `SourceKind` case (+ `SourceSelection`), slot the source into
-   `homePriority` / `tiePriority`, sample its presence into the arbiter's
-   per-pass `[SourceKind: SourcePresence]` map, and add one `applyKind` arm to
-   swap in its command sink. `decide` and `ActivationRecency` already generalize
-   over `SourceKind.allCases`, so the decision core needs no change. Add a menu
-   option.
+1. Run a local process implementing `/health` + `/now-playing` + `/command` on a
+   `127.0.0.1` port.
+2. Drop a `*.jellysource` manifest (`id`, `displayName`, `port`, optional
+   `pathPrefix`/`homeRank`/`tieRank`) into
+   `~/Library/Application Support/software.trypwood.jellysleeve/Sources/`.
+3. Relaunch. `SourceRegistry` discovers it and builds its `LoopbackSourceClient`
+   + `LoopbackSourceFeed`; the arbiter weighs it (`decide` and `ActivationRecency`
+   generalize over the registry's id set, which becomes the observe order); and
+   it appears in the menu's Source picker, labeled by the trusted manifest name.
+
+What still requires app code:
+- A **non-HTTP transport** (XPC, Unix socket, MPRIS/D-Bus) — the ABI is
+  HTTP-loopback-only in v1, and Jellyfin stays the one privileged non-loopback
+  built-in with its own transport.
+- `applyKind` has a dedicated Jellyfin arm; all loopback sources share one
+  generic arm (a registry lookup), so a new *loopback* source never touches it.
 
 The arbiter's decision logic, gating, and the capability-driven UI generalize
-without touching the Jellyfin transport. (The per-source `applyKind` sink-swap
-arm is the one spot still enumerated by kind — deliberately, until a real third
-source justifies a registry abstraction.)
+without touching the Jellyfin transport.
 
 ## 11. Tests
 

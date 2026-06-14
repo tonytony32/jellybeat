@@ -52,7 +52,7 @@ struct JellySleeveApp: App {
     @ViewBuilder
     private var sourceSection: some View {
         Picker(selection: sourceBinding) {
-            ForEach(SourceSelection.allCases) { option in
+            ForEach(sourceOptions, id: \.self) { option in
                 Text(sourceLabel(for: option)).tag(option)
             }
         } label: {
@@ -68,14 +68,26 @@ struct JellySleeveApp: App {
         )
     }
 
+    /// Menu options: Automatic, then one entry per registered source (Jellyfin +
+    /// every loopback source), each pinned by id.
+    private var sourceOptions: [SourceSelection] {
+        [.auto] + appDelegate.registry.selectableIDs.map(SourceSelection.forced)
+    }
+
     private func sourceLabel(for option: SourceSelection) -> String {
-        guard option == .auto,
-              appDelegate.settings.sourceSelection == .auto else {
-            return option.displayName
+        guard option == .auto else {
+            // A forced pick: the source's TRUSTED display name (manifest/built-in),
+            // never the source-served `/health.sourceName`.
+            if let id = option.forcedKind {
+                return appDelegate.registry.displayName(for: id)
+            }
+            return String(localized: "Automatic")
         }
-        let driving = appDelegate.arbiter.activeKind == .youtube
-            ? String(localized: "YouTube")
-            : String(localized: "Jellyfin")
+        guard appDelegate.settings.sourceSelection == .auto else {
+            return String(localized: "Automatic")
+        }
+        // In auto, note which source is currently driving.
+        let driving = appDelegate.registry.displayName(for: appDelegate.arbiter.activeKind)
         return String(localized: "Automatic (\(driving))")
     }
 
