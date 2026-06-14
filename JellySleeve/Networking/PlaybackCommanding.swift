@@ -40,6 +40,7 @@ nonisolated struct SourceCapabilities: Equatable, Sendable {
     var canSetVolume: Bool
     var hasFavorites: Bool
     var hasQueue: Bool
+
     /// The source can raise its own window/tab to the foreground (the bridge's
     /// `focusTab`). Drives the artwork's "double-click to go to the tab"
     /// affordance. False for sources that don't advertise it (Jellyfin, older
