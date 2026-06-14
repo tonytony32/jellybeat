@@ -2,14 +2,13 @@ import Foundation
 
 /// Vendor-neutral "remote control" sink for the currently driving playback
 /// source. JellySleeve's `PlayerStore` routes its transport actions through one
-/// of these without knowing whether Jellyfin or the YouTube bridge is behind it
-/// (see `docs/youtube-bridge-arbiter-plan.md` and the bridge's
-/// `docs/playback-source.md`).
+/// of these without knowing whether Jellyfin or a loopback source is behind it
+/// (the loopback contract is `docs/loopback-source-abi-v1.md`).
 ///
 /// Implementations are value types crossing actor boundaries, so the protocol
 /// is `Sendable` with `async throws` methods. Each method is self-contained:
 /// the sink already knows how to target its backend (Jellyfin captures the
-/// session id; the bridge targets the active tab), so callers pass no routing.
+/// session id; a loopback source targets its own port), so callers pass no routing.
 nonisolated protocol PlaybackCommanding: Sendable {
     func playPause() async throws
     func next() async throws
@@ -41,10 +40,6 @@ nonisolated struct SourceCapabilities: Equatable, Sendable {
     var canSetVolume: Bool
     var hasFavorites: Bool
     var hasQueue: Bool
-    /// How the "favorite" affordance should read for this source — a library
-    /// favorite (Jellyfin → heart) vs. a YouTube "like" (thumbs-up). Lets the
-    /// overlay pick the right glyph without knowing the concrete backend.
-    var favoriteStyle: FavoriteStyle = .heart
 
     /// The source can raise its own window/tab to the foreground (the bridge's
     /// `focusTab`). Drives the artwork's "double-click to go to the tab"
@@ -52,39 +47,58 @@ nonisolated struct SourceCapabilities: Equatable, Sendable {
     /// bridges, future non-YouTube sources), so the affordance stays hidden.
     var canFocusTab: Bool = false
 
-    /// Jellyfin: full transport control plus favorites (a heart) and a play queue.
-    /// No tab to focus — the overlay's double-click opens the Jellyfin client
-    /// instead.
+    /// How the "favorite" affordance should read for this source — a library
+    /// favorite (Jellyfin → heart) vs. a "like" (a loopback source → thumbs-up).
+    /// Lets the overlay pick the right glyph without knowing the backend.
+    var favoriteStyle: FavoriteStyle = .heart
+
+    /// Jellyfin: full transport control plus favorites (a heart) and a play
+    /// queue. No tab to focus — the overlay's double-click opens the Jellyfin
+    /// client instead.
     static let jellyfin = SourceCapabilities(
         canPlayPause: true, canNext: true, canPrevious: true,
         canSeek: true, canSetVolume: true, hasFavorites: true, hasQueue: true,
-        favoriteStyle: .heart, canFocusTab: false
+        canFocusTab: false, favoriteStyle: .heart
     )
 
-    /// YouTube bridge default: full transport control plus favorites (the "like",
-    /// a thumbs-up), no queue. Used as the immediate fallback before `/v1/health`
-    /// is read; `canFocusTab` stays conservatively `false` until health confirms
-    /// the source supports it (older bridges won't advertise the capability).
-    static let youtube = SourceCapabilities(
+    /// Default for a loopback source before `GET /health` is read (and the
+    /// fallback when it's unreachable): full transport control + a "like"-style
+    /// favorite (the YouTube bridge advertises this), no queue, no focus.
+    /// `/health` refines all of these; `canFocusTab` stays `false` until it
+    /// confirms, so the artwork affordance only lights up when supported.
+    static let loopbackDefault = SourceCapabilities(
         canPlayPause: true, canNext: true, canPrevious: true,
         canSeek: true, canSetVolume: true, hasFavorites: true, hasQueue: false,
-        favoriteStyle: .like, canFocusTab: false
+        canFocusTab: false, favoriteStyle: .like
     )
 }
 
 /// Presentation style for a source's favorite affordance: a heart for a library
-/// favorite (Jellyfin), a thumbs-up for a YouTube "like / me gusta".
+/// favorite (Jellyfin), a thumbs-up for a "like / me gusta" (loopback sources).
 nonisolated enum FavoriteStyle: Sendable, Equatable {
     case heart
     case like
 }
 
-/// Which backend is currently driving the overlay. Used by the arbiter and the
-/// menu-bar "Source" override.
-nonisolated enum SourceKind: String, CaseIterable, Sendable {
-    case jellyfin
-    case youtube
+/// Stable identity of a playback source — Jellyfin, the built-in YouTube bridge,
+/// or any third-party loopback source declared by a manifest (see
+/// `docs/loopback-source-abi-v1.md`). An **open** string id rather than a closed
+/// enum, so a plugin's reverse-DNS id is a first-class source. The two built-ins
+/// keep their well-known static members so existing call sites still read
+/// `.jellyfin` / `.youtube`.
+nonisolated struct SourceID: Hashable, Sendable, CustomStringConvertible {
+    let rawValue: String
+    init(rawValue: String) { self.rawValue = rawValue }
+    init(_ rawValue: String) { self.rawValue = rawValue }
+    var description: String { rawValue }
+
+    static let jellyfin = SourceID(rawValue: "jellyfin")
+    static let youtube = SourceID(rawValue: "youtube")
 }
+
+/// The codebase historically spoke of a `SourceKind`; it is now the open
+/// `SourceID`, so third-party sources are admissible without touching call sites.
+typealias SourceKind = SourceID
 
 /// Adapts `JellyfinClient` (whose command methods are keyed by a session id) to
 /// the vendor-neutral `PlaybackCommanding` sink. Rebuilt per active session by

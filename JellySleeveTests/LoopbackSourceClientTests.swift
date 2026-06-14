@@ -40,17 +40,22 @@ final nonisolated class BridgeMockURLProtocol: URLProtocol {
     override func stopLoading() {}
 }
 
-/// Tests for `YouTubeBridgeClient` using `BridgeMockURLProtocol` to intercept
-/// the loopback `URLSession`. Cover the `focusTab` command wire format + status
-/// handling and the `canFocusTab` capability parsing from `/v1/health`.
+/// Tests for `LoopbackSourceClient` (configured for the built-in YouTube
+/// endpoint) using `BridgeMockURLProtocol` to intercept the loopback
+/// `URLSession`. Cover the `focusTab` command wire format + status handling and
+/// the `canFocusTab` capability parsing from `/v1/health`.
 ///
 /// `.serialized` because the mock keeps a single static handler the suite's own
 /// tests would otherwise race.
 @Suite(.serialized)
-nonisolated struct YouTubeBridgeClientTests {
+nonisolated struct LoopbackSourceClientTests {
 
-    private func makeClient() -> YouTubeBridgeClient {
-        YouTubeBridgeClient(protocolClasses: [BridgeMockURLProtocol.self])
+    private func makeClient() -> LoopbackSourceClient {
+        LoopbackSourceClient(
+            baseURL: URL(string: "http://127.0.0.1:8976")!,
+            pathPrefix: "/v1",
+            protocolClasses: [BridgeMockURLProtocol.self]
+        )
     }
 
     private func response(_ statusCode: Int, for request: URLRequest) -> HTTPURLResponse {

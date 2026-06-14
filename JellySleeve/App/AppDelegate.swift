@@ -15,9 +15,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let player: PlayerStore
     let themes: ThemeRegistry
     let artworkProvider: ArtworkCacheProvider
-    /// Decides which source (Jellyfin / YouTube) drives the overlay. Exposed so
-    /// the menu-bar "Source" section can mark the active one.
+    /// Decides which source (Jellyfin / a loopback source) drives the overlay.
+    /// Exposed so the menu-bar "Source" section can mark the active one.
     let arbiter: SourceArbiter
+    /// All known playback sources — the built-in Jellyfin + YouTube, plus any
+    /// third-party loopback sources discovered from `*.jellysource` manifests.
+    /// The menu's "Source" picker lists these.
+    let registry: SourceRegistry
 
     private let windowController: OverlayWindowController
     private let connection: PlaybackConnectionCoordinator
@@ -45,16 +49,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             artworkProvider: artworkProvider
         )
         self.connection = connection
-        // The YouTube bridge feed + its client (shared as the command sink), and
-        // the arbiter that picks the active source between it and Jellyfin.
-        let ytClient = YouTubeBridgeClient()
-        let ytFeed = YouTubeBridgeFeed(client: ytClient)
+        // Discover playback sources: the built-in YouTube loopback bridge plus
+        // any third-party `*.jellysource` manifests. The arbiter weighs them
+        // against Jellyfin (the privileged non-loopback built-in).
+        let registry = SourceRegistry.loadingFromDisk()
+        self.registry = registry
         self.arbiter = SourceArbiter(
             settings: settings,
             player: player,
             coordinator: connection,
-            ytFeed: ytFeed,
-            ytClient: ytClient
+            registry: registry
         )
         super.init()
         // Tell macOS not to restore Settings between launches. Without this,

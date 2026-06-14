@@ -18,6 +18,7 @@ struct SettingsStoreTests {
         d.removeObject(forKey: SettingsStore.Keys.storeApiKeyInUserDefaults)
         d.removeObject(forKey: SettingsStore.Keys.useKeychain)
         d.removeObject(forKey: SettingsStore.Keys.apiKey)
+        d.removeObject(forKey: SettingsStore.Keys.sourceSelection)
         try? KeychainHelper.delete()
     }
 
@@ -166,5 +167,27 @@ struct SettingsStoreTests {
         #expect(store2.apiKey == "relaunch-key")
         #expect(KeychainHelper.load() == "relaunch-key")
         #expect(UserDefaults.standard.string(forKey: SettingsStore.Keys.apiKey) == nil)
+    }
+
+    // MARK: - Source selection persistence
+
+    /// The stored source selection round-trips through `init` — including a
+    /// third-party id (the open id space) — and defaults to `.auto` when absent.
+    /// The persisted string equals the source id, so old "jellyfin"/"youtube"/
+    /// "auto" values migrate with zero rewrite.
+    @Test
+    func sourceSelectionPersistsAndRoundTrips() {
+        resetState()
+        defer { resetState() }
+
+        #expect(SettingsStore().sourceSelection == .auto)          // absent → auto
+
+        let store = SettingsStore()
+        store.sourceSelection = .youtube
+        #expect(UserDefaults.standard.string(forKey: SettingsStore.Keys.sourceSelection) == "youtube")
+        #expect(SettingsStore().sourceSelection == .youtube)        // reloads the pin
+
+        store.sourceSelection = .forced(SourceID(rawValue: "com.example.spotify"))
+        #expect(SettingsStore().sourceSelection.forcedKind == SourceID(rawValue: "com.example.spotify"))
     }
 }

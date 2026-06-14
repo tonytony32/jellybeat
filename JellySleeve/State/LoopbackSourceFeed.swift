@@ -18,36 +18,38 @@ nonisolated struct ExternalPlayback: Equatable, Sendable {
     )
 }
 
-/// Sibling feed to the Jellyfin transport: a lightweight 1 s poll of the YouTube
-/// bridge that maps each `BridgeSnapshot` onto the normalized `ExternalPlayback`
-/// and notifies the arbiter. It owns no overlay state directly — the arbiter
-/// decides whether this source is the active one and, if so, writes the snapshot
-/// into `PlayerStore`. Keeps polling even while it's *not* the active source so
-/// the arbiter can detect YouTube starting up.
+/// Sibling feed to the Jellyfin transport: a lightweight 1 s poll of one loopback
+/// `PlaybackSource` that maps each `BridgeSnapshot` onto the normalized
+/// `ExternalPlayback` and notifies the arbiter. It owns no overlay state directly
+/// — the arbiter decides whether this source is the active one and, if so, writes
+/// the snapshot into `PlayerStore`. Keeps polling even while it's *not* the active
+/// source so the arbiter can detect this source starting up.
+///
+/// One instance per loopback source (built-in YouTube + any third-party manifest
+/// source); the owning `SourceRegistry` builds them and the arbiter weighs them.
 @MainActor
 @Observable
-final class YouTubeBridgeFeed {
+final class LoopbackSourceFeed {
     private static let logger = Logger(
         subsystem: "software.trypwood.jellysleeve",
         category: "state"
     )
 
-    /// Stable identity for the current item when the bridge omits a `videoId`
-    /// (e.g. a livestream): keeps `ArtworkView`'s load key and `PlayerStore`'s
-    /// track-change smoothing from thrashing across polls.
-    private static let fallbackItemId = "youtube-current"
+    /// This source's stable identity, used to key presence/recency in the arbiter
+    /// and to derive the per-source fallback item id.
+    let id: SourceID
 
-    private let client: YouTubeBridgeClient
+    private let client: LoopbackSourceClient
     private let pollInterval: Duration
 
     /// Latest mapped state. `nil` until the first poll completes.
     private(set) var latest: ExternalPlayback?
 
-    /// The source's self-described capabilities, read from `/v1/health` on a
+    /// The source's self-described capabilities, read from `GET /health` on a
     /// flip. Owned here (not on the arbiter) so capability state lives with the
     /// feed it describes; the arbiter installs it into `PlayerStore` on a flip.
-    /// Defaults to the YouTube constant set until a health read confirms.
-    private(set) var capabilities: SourceCapabilities = .youtube
+    /// Defaults to the conservative loopback set until a health read confirms.
+    private(set) var capabilities: SourceCapabilities = .loopbackDefault
 
     /// Invoked after each poll so the owner (arbiter) can re-evaluate the active
     /// source against the refreshed `latest`.
@@ -55,7 +57,8 @@ final class YouTubeBridgeFeed {
 
     private var task: Task<Void, Never>?
 
-    init(client: YouTubeBridgeClient = YouTubeBridgeClient(), pollInterval: Duration = .seconds(1)) {
+    init(id: SourceID, client: LoopbackSourceClient, pollInterval: Duration = .seconds(1)) {
+        self.id = id
         self.client = client
         self.pollInterval = pollInterval
     }
@@ -64,14 +67,14 @@ final class YouTubeBridgeFeed {
 
     func start() {
         guard task == nil else { return }
-        Self.logger.notice("Starting YouTube bridge feed")
+        Self.logger.notice("Starting loopback feed \(self.id.rawValue, privacy: .public)")
         task = Task { [weak self] in
             await self?.runLoop()
         }
     }
 
     func stop() {
-        Self.logger.notice("Stopping YouTube bridge feed")
+        Self.logger.notice("Stopping loopback feed \(self.id.rawValue, privacy: .public)")
         task?.cancel()
         task = nil
     }
@@ -83,7 +86,7 @@ final class YouTubeBridgeFeed {
     }
 
     /// Replace the cached capabilities with a fresh read (the arbiter calls this
-    /// after fetching `/v1/health` on a flip to YouTube).
+    /// after fetching `GET /health` on a flip to this source).
     func applyCapabilities(_ caps: SourceCapabilities) {
         capabilities = caps
     }
@@ -98,13 +101,21 @@ final class YouTubeBridgeFeed {
     private func poll() async {
         let snapshot = await client.fetchNowPlaying()
         guard !Task.isCancelled else { return }
-        latest = Self.map(snapshot)
+        latest = Self.map(snapshot, fallbackItemId: "\(id.rawValue)-current")
         onUpdate?()
     }
 
     // MARK: - Mapping (BridgeSnapshot → normalized contract)
 
-    static func map(_ snapshot: BridgeSnapshot?) -> ExternalPlayback {
+    /// `fallbackItemId` gives the item a stable identity when the source omits an
+    /// `itemId` (e.g. a livestream), so `ArtworkView`'s load key and
+    /// `PlayerStore`'s track-change smoothing don't thrash across polls. Defaults
+    /// to a generic constant; the live feed passes a per-source value so distinct
+    /// sources don't collide.
+    static func map(
+        _ snapshot: BridgeSnapshot?,
+        fallbackItemId: String = "loopback-current"
+    ) -> ExternalPlayback {
         guard let snapshot, snapshot.active else { return .idle }
 
         let itemId = snapshot.videoId ?? fallbackItemId
@@ -124,7 +135,7 @@ final class YouTubeBridgeFeed {
             album: snapshot.album ?? "",
             runtime: runtime,
             position: position,
-            sessionId: "",                    // unused for YouTube commands
+            sessionId: "",                    // unused for loopback commands
             isFavorite: snapshot.liked ?? false,
             artworkURL: Self.safeArtworkURL(snapshot.artworkUrl)
         )
@@ -137,12 +148,11 @@ final class YouTubeBridgeFeed {
         )
     }
 
-    /// Accept an artwork URL only if it's `http`/`https`. The string comes from
-    /// a local HTTP endpoint that is normally the trusted bridge, but binding to
-    /// the port isn't authenticated (the contract's documented residual risk):
-    /// a `file://` or other-scheme value must never be dereferenced by the
-    /// artwork loader. The bridge already host-allowlists the URL at the source;
-    /// this is the consumer-side belt-and-suspenders.
+    /// Accept an artwork URL only if it's `http`/`https`. The string comes from a
+    /// local HTTP endpoint that is normally the trusted source, but binding to the
+    /// port isn't authenticated (the ABI's documented residual risk): a `file://`
+    /// or other-scheme value must never be dereferenced by the artwork loader.
+    /// Consumer-side belt-and-suspenders.
     private static func safeArtworkURL(_ raw: String?) -> URL? {
         guard let raw, let url = URL(string: raw),
               let scheme = url.scheme?.lowercased(),

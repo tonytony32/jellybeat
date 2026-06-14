@@ -42,7 +42,7 @@ struct PlayerStoreSourceGatingTests {
     @Test
     func gatedIngestUpdatesPresenceButNotState() {
         let store = PlayerStore()
-        store.capabilities = .youtube
+        store.capabilities = .loopbackDefault
         store.jellyfinIsActiveSource = false
 
         var notified = false
@@ -69,7 +69,7 @@ struct PlayerStoreSourceGatingTests {
     @Test
     func appliesExternalSnapshot() {
         let store = PlayerStore()
-        store.capabilities = .youtube
+        store.capabilities = .loopbackDefault
         store.jellyfinIsActiveSource = false
 
         store.applyExternalSnapshot(

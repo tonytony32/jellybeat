@@ -305,29 +305,42 @@ final class SettingsStore {
 }
 
 /// The overlay's playback-source preference, persisted in `SettingsStore`.
-/// `auto` defers to the arbiter; the other cases pin a specific source.
-nonisolated enum SourceSelection: String, CaseIterable, Identifiable, Sendable {
-    case auto
-    case jellyfin
-    case youtube
+/// `auto` defers to the arbiter; a forced selection pins a specific source by
+/// id. An **open** value type (not a closed enum) so a third-party source id can
+/// be pinned; the two built-ins keep their `.jellyfin` / `.youtube` statics, and
+/// the persisted `rawValue` round-trips any id losslessly.
+nonisolated struct SourceSelection: Hashable, Sendable, Identifiable {
+    enum Mode: Hashable, Sendable {
+        case auto
+        case forced(SourceID)
+    }
+
+    let mode: Mode
+    init(mode: Mode) { self.mode = mode }
+
+    static let auto = SourceSelection(mode: .auto)
+    static let jellyfin = SourceSelection(mode: .forced(.jellyfin))
+    static let youtube = SourceSelection(mode: .forced(.youtube))
+    static func forced(_ id: SourceID) -> SourceSelection { .init(mode: .forced(id)) }
 
     var id: String { rawValue }
 
-    var displayName: String {
-        switch self {
-        case .auto:     return "Automatic"
-        case .jellyfin: return "Jellyfin"
-        case .youtube:  return "YouTube"
-        }
+    /// The pinned source, or `nil` in `auto` (let the arbiter decide).
+    var forcedKind: SourceID? {
+        if case .forced(let k) = mode { return k }
+        return nil
     }
 
-    /// The pinned source, or `nil` in `auto` (let the arbiter decide).
-    var forcedKind: SourceKind? {
-        switch self {
-        case .auto:     return nil
-        case .jellyfin: return .jellyfin
-        case .youtube:  return .youtube
-        }
+    /// Persisted string: a forced selection stores its source id; `auto` stores
+    /// "auto". Lossless for built-in and third-party ids alike, so the old
+    /// persisted "jellyfin"/"youtube"/"auto" values migrate with zero rewrite.
+    var rawValue: String {
+        if case .forced(let k) = mode { return k.rawValue }
+        return "auto"
+    }
+
+    init?(rawValue: String) {
+        self = (rawValue.isEmpty || rawValue == "auto") ? .auto : .forced(SourceID(rawValue: rawValue))
     }
 }
 
