@@ -58,6 +58,9 @@ vendor-neutral and frozen. The consumer side lives in
   **`true`**; `hasFavorites`/`hasQueue`/`canFocusTab` default **`false`**.
 - Capabilities are the **single source of truth** for what the running process
   supports — the manifest deliberately cannot declare them, so it can never lie.
+- When `hasFavorites` is `true`, a loopback source's favorite affordance is a
+  **"like"** (a thumbs-up, vs. Jellyfin's heart): the toggle uses `like` /
+  `unlike` (§5) and the current state is the `liked` field in `now-playing` (§4).
 - The app never sends a command (§5) a capability did not advertise.
 
 ## 4. `GET {prefix}/now-playing`
@@ -75,12 +78,17 @@ vendor-neutral and frozen. The consumer side lives in
   "volume": 0.8,                  // 0.0–1.0 | null
   "itemId": "abc123",             // string | null — stable identity for this item
   "artworkUrl": "https://…",      // string | null — UNTRUSTED; http/https only (§7)
+  "liked": false,                 // bool | null — "like" state; null/absent ⇒ false
   "updatedAtMs": 1700000000000    // number | null
 }
 ```
 
 - **Documented alias:** the decoder reads `itemId ?? videoId`, so a source that
   emits the older `videoId` key keeps working unmodified.
+- **`liked`** is the authoritative favorite/"like" state, re-read every poll, so a
+  like made directly in the source (e.g. in the browser) stays in sync. Absent or
+  `null` reads as `false`. Only meaningful when `/health` advertises
+  `hasFavorites`; toggled via `like`/`unlike` (§5).
 - **Idle is never an error.** Both `{"active": false}` **and** a
   refused / timed-out / dropped connection normalize to the single *idle*
   signal. A source that isn't running is simply idle, not broken.
@@ -101,6 +109,8 @@ Request body:
 | `seek`       | seconds (number)   | seek to absolute position        |
 | `setVolume`  | 0.0–1.0 (number)   | set output volume                |
 | `focusTab`   | —                  | bring the source's window/tab to front |
+| `like`       | —                  | set the current item's "like" (favorite) |
+| `unlike`     | —                  | clear the current item's "like"          |
 
 Responses (best-effort / async — the *result* is observed on the next
 `now-playing` read, which is the source of truth):
@@ -111,6 +121,9 @@ Responses (best-effort / async — the *result* is observed on the next
 
 A source should reject an action it doesn't support with a `4xx`; in practice
 the app won't send one, because it gates every command on `/health` capabilities.
+`like`/`unlike` must be **idempotent** (a no-op if the item is already in that
+state): the app sends the explicit target rather than a blind toggle, so a stale
+client view can't double-flip. Both are gated on `hasFavorites`.
 
 ## 6. Idle vs error semantics
 

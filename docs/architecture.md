@@ -108,8 +108,12 @@ protocol PlaybackCommanding: Sendable {
   captured `sessionId` always targets the mirrored device. Units: `Duration` →
   Jellyfin ticks; volume 0–100; favorites supported.
 - **`LoopbackSourceClient`** — `toggle`/`next`/`previous` map 1:1; `seek` value =
-  seconds; `setVolume` value = percent/100; favorites return `nil`. One instance
-  per loopback source (built-in YouTube + third-party manifests).
+  seconds; `setVolume` value = percent/100; the favorite is the source's **"like"**
+  (idempotent `like`/`unlike`, rendered as a thumbs-up via
+  `SourceCapabilities.favoriteStyle`), and the `liked` field from each poll is the
+  authoritative state — `PlayerStore` trusts it for loopback sources, so a like
+  made in the source (e.g. the browser) stays in sync. One instance per loopback
+  source (built-in YouTube + third-party manifests).
 
 `PlayerStore` holds a `commandSink` (transport) **and** a `client:
 JellyfinClient?` (for the Jellyfin-only operations the sink doesn't model:
@@ -138,6 +142,14 @@ the menu.
 The arbiter `reevaluate`s on: each loopback poll (`feed.onUpdate` →
 `.loopback(id)`), each Jellyfin ingest (`player.onJellyfinUpdate`), and a
 `sourceSelection` change.
+
+### Live capability refresh
+
+A loopback source's `/health` capabilities are read on a flip to it. They're
+**also** re-read when that source *reconnects* — its feed crosses idle→active
+(e.g. its bridge is rebuilt to advertise a new capability) while it's already the
+active source and no flip happened this pass — so a live capability change lands
+within one poll, with no restart (pure, tested: `shouldRefreshOnReconnect`).
 
 ### Decision policy (pure, tested: `SourceArbiter.decide`)
 
