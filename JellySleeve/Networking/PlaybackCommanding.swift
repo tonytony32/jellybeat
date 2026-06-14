@@ -46,24 +46,37 @@ nonisolated struct SourceCapabilities: Equatable, Sendable {
     /// bridges, future non-YouTube sources), so the affordance stays hidden.
     var canFocusTab: Bool = false
 
-    /// Jellyfin: full transport control plus favorites and a play queue. No
-    /// tab to focus — the overlay's double-click opens the Jellyfin client
-    /// instead.
+    /// How the "favorite" affordance should read for this source — a library
+    /// favorite (Jellyfin → heart) vs. a "like" (a loopback source → thumbs-up).
+    /// Lets the overlay pick the right glyph without knowing the backend.
+    var favoriteStyle: FavoriteStyle = .heart
+
+    /// Jellyfin: full transport control plus favorites (a heart) and a play
+    /// queue. No tab to focus — the overlay's double-click opens the Jellyfin
+    /// client instead.
     static let jellyfin = SourceCapabilities(
         canPlayPause: true, canNext: true, canPrevious: true,
         canSeek: true, canSetVolume: true, hasFavorites: true, hasQueue: true,
-        canFocusTab: false
+        canFocusTab: false, favoriteStyle: .heart
     )
 
-    /// Conservative default for any loopback source before `GET /health` is
-    /// read (and the fallback when it's unreachable): full transport control, no
-    /// favorites, no queue, no focus. `canFocusTab` stays `false` until health
-    /// confirms it, so the artwork affordance only lights up when supported.
+    /// Default for a loopback source before `GET /health` is read (and the
+    /// fallback when it's unreachable): full transport control + a "like"-style
+    /// favorite (the YouTube bridge advertises this), no queue, no focus.
+    /// `/health` refines all of these; `canFocusTab` stays `false` until it
+    /// confirms, so the artwork affordance only lights up when supported.
     static let loopbackDefault = SourceCapabilities(
         canPlayPause: true, canNext: true, canPrevious: true,
-        canSeek: true, canSetVolume: true, hasFavorites: false, hasQueue: false,
-        canFocusTab: false
+        canSeek: true, canSetVolume: true, hasFavorites: true, hasQueue: false,
+        canFocusTab: false, favoriteStyle: .like
     )
+}
+
+/// Presentation style for a source's favorite affordance: a heart for a library
+/// favorite (Jellyfin), a thumbs-up for a "like / me gusta" (loopback sources).
+nonisolated enum FavoriteStyle: Sendable, Equatable {
+    case heart
+    case like
 }
 
 /// Stable identity of a playback source — Jellyfin, the built-in YouTube bridge,

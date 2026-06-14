@@ -22,6 +22,7 @@ nonisolated struct BridgeSnapshot: Decodable, Equatable, Sendable {
     let videoId: String?
     let artworkUrl: String?
     let volume: Double?         // 0.0–1.0
+    let liked: Bool?            // "like" / me gusta state; null = unknown
     let updatedAtMs: Double?
 
     var isPlaying: Bool { state == "playing" }
@@ -32,7 +33,8 @@ nonisolated struct BridgeSnapshot: Decodable, Equatable, Sendable {
         active: Bool, source: String? = nil, state: String? = nil,
         title: String? = nil, artist: String? = nil, album: String? = nil,
         durationSec: Double? = nil, positionSec: Double? = nil, videoId: String? = nil,
-        artworkUrl: String? = nil, volume: Double? = nil, updatedAtMs: Double? = nil
+        artworkUrl: String? = nil, volume: Double? = nil, liked: Bool? = nil,
+        updatedAtMs: Double? = nil
     ) {
         self.active = active
         self.source = source
@@ -45,12 +47,13 @@ nonisolated struct BridgeSnapshot: Decodable, Equatable, Sendable {
         self.videoId = videoId
         self.artworkUrl = artworkUrl
         self.volume = volume
+        self.liked = liked
         self.updatedAtMs = updatedAtMs
     }
 
     private enum CodingKeys: String, CodingKey {
         case active, source, state, title, artist, album
-        case durationSec, positionSec, videoId, itemId, artworkUrl, volume, updatedAtMs
+        case durationSec, positionSec, videoId, itemId, artworkUrl, volume, liked, updatedAtMs
     }
 
     /// Custom decode so the canonical `itemId` (ABI v1) and the legacy `videoId`
@@ -70,6 +73,7 @@ nonisolated struct BridgeSnapshot: Decodable, Equatable, Sendable {
             ?? c.decodeIfPresent(String.self, forKey: .videoId)
         artworkUrl = try c.decodeIfPresent(String.self, forKey: .artworkUrl)
         volume = try c.decodeIfPresent(Double.self, forKey: .volume)
+        liked = try c.decodeIfPresent(Bool.self, forKey: .liked)
         updatedAtMs = try c.decodeIfPresent(Double.self, forKey: .updatedAtMs)
     }
 }
@@ -174,7 +178,9 @@ nonisolated struct LoopbackSourceClient: Sendable, PlaybackCommanding {
             hasQueue: caps.hasQueue ?? false,
             // Absent on older sources that predate the command → stay false so
             // the artwork's focus affordance only lights up when supported.
-            canFocusTab: caps.canFocusTab ?? false
+            canFocusTab: caps.canFocusTab ?? false,
+            // A loopback source's favorite is rendered as a "like" (thumbs-up).
+            favoriteStyle: .like
         )
     }
 
@@ -193,10 +199,15 @@ nonisolated struct LoopbackSourceClient: Sendable, PlaybackCommanding {
         try await command("setVolume", value: Double(clamped) / 100.0)
     }
 
-    /// Loopback sources don't model favorites — report unsupported so the heart
-    /// UI stays hidden and `PlayerStore` keeps its optimistic state untouched.
+    /// Toggle the source's "like" for the current item. Sends the idempotent
+    /// `like`/`unlike` (the source no-ops if already in that state) rather than a
+    /// blind toggle, so a stale `current` can't double-flip. Best-effort/async on
+    /// the source side, so we optimistically report the target; the authoritative
+    /// `liked` arrives in a later now-playing poll.
     func toggleFavorite(itemId: String, current: Bool) async throws -> Bool? {
-        nil
+        let target = !current
+        try await command(target ? "like" : "unlike")
+        return target
     }
 
     /// Raise the source's window/tab. `focusTab` carries no value. Best-effort:

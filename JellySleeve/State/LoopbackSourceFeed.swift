@@ -136,7 +136,7 @@ final class LoopbackSourceFeed {
             runtime: runtime,
             position: position,
             sessionId: "",                    // unused for loopback commands
-            isFavorite: false,
+            isFavorite: snapshot.liked ?? false,
             artworkURL: Self.safeArtworkURL(snapshot.artworkUrl)
         )
 
