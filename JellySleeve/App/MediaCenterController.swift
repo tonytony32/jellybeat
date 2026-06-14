@@ -24,6 +24,15 @@ final class MediaCenterController {
     private let artworkProvider: ArtworkCacheProvider
     private var observationTask: Task<Void, Never>?
     private var lastAppliedArtworkKey: String?
+    /// Whether the most recent non-nil track came from a browser-backed source
+    /// (YouTube via the Safari bridge). Safari registers its *own* system Now
+    /// Playing entry while it plays audio, and macOS strands that entry when
+    /// Safari quits (a dead-PID card lingering with the video's artwork). We use
+    /// this to know when to evict it — see `evictStaleBrowserNowPlaying`.
+    private var lastSourceWasBrowser = false
+    /// In-flight eviction (a brief re-assert, then stop). Cancelled if a new
+    /// track arrives first, so we never wipe live playback.
+    private var evictionTask: Task<Void, Never>?
 
     init(player: PlayerStore, artworkProvider: ArtworkCacheProvider) {
         self.player = player
@@ -104,6 +113,7 @@ final class MediaCenterController {
             _ = player.currentTrack
             _ = player.isPaused
             _ = player.connectionState
+            _ = player.jellyfinIsActiveSource
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 self?.refreshAndArm()
@@ -114,11 +124,21 @@ final class MediaCenterController {
     private func refreshNowPlayingInfo() {
         let center = MPNowPlayingInfoCenter.default()
         guard let track = player.currentTrack else {
-            center.nowPlayingInfo = nil
-            center.playbackState = .stopped
+            if lastSourceWasBrowser {
+                evictStaleBrowserNowPlaying(center)
+            } else {
+                center.nowPlayingInfo = nil
+                center.playbackState = .stopped
+            }
             lastAppliedArtworkKey = nil
+            lastSourceWasBrowser = false
             return
         }
+
+        // A real track is up: cancel any pending eviction so its delayed clear
+        // can't wipe live playback.
+        evictionTask?.cancel()
+        evictionTask = nil
 
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: track.title,
@@ -139,8 +159,43 @@ final class MediaCenterController {
 
         center.nowPlayingInfo = info
         center.playbackState = player.isPaused ? .paused : .playing
+        // Remember whether this source registers its own system card, so we know
+        // to evict Safari's stranded entry when it goes idle.
+        lastSourceWasBrowser = !player.jellyfinIsActiveSource
 
         ensureArtwork(for: track)
+    }
+
+    /// The browser-backed source (YouTube via Safari) just went idle. Safari owns
+    /// a separate system Now Playing entry while it plays audio, and macOS leaves
+    /// it stranded — with the dead PID — when Safari quits, so the card lingers
+    /// with the video's title and artwork. We can't clear another app's entry via
+    /// `MPNowPlayingInfoCenter`, but we can *supersede* it: assert a fresh playing
+    /// edge so `mediaremoteagent` promotes us to the active now-playing app over
+    /// the dead Safari entry, then stop — our `.stopped` clears the surface.
+    ///
+    /// This works because JellySleeve is already a now-playing app without
+    /// producing local audio (it owns the surface for Jellyfin the same way); the
+    /// only reason Safari outranked us during playback was that it was the live
+    /// audio source. Once it's gone, a new assertion wins.
+    private func evictStaleBrowserNowPlaying(_ center: MPNowPlayingInfoCenter) {
+        // Re-assert with the just-departed track's info (whatever we last set),
+        // bumped to a playing rate, so the assertion is a valid playing edge.
+        var info = center.nowPlayingInfo ?? [:]
+        info[MPNowPlayingInfoPropertyPlaybackRate] = 1.0
+        center.nowPlayingInfo = info
+        center.playbackState = .playing
+
+        evictionTask?.cancel()
+        evictionTask = Task { @MainActor [weak self] in
+            // Give the agent a beat to re-point the surface at us before we clear.
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            let center = MPNowPlayingInfoCenter.default()
+            center.nowPlayingInfo = nil
+            center.playbackState = .stopped
+            self?.evictionTask = nil
+        }
     }
 
     private func durationSeconds(_ duration: Duration) -> Double {
