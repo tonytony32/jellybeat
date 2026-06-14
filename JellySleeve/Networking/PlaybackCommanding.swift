@@ -41,30 +41,42 @@ nonisolated struct SourceCapabilities: Equatable, Sendable {
     var canSetVolume: Bool
     var hasFavorites: Bool
     var hasQueue: Bool
+    /// How the "favorite" affordance should read for this source — a library
+    /// favorite (Jellyfin → heart) vs. a YouTube "like" (thumbs-up). Lets the
+    /// overlay pick the right glyph without knowing the concrete backend.
+    var favoriteStyle: FavoriteStyle = .heart
+
     /// The source can raise its own window/tab to the foreground (the bridge's
     /// `focusTab`). Drives the artwork's "double-click to go to the tab"
     /// affordance. False for sources that don't advertise it (Jellyfin, older
     /// bridges, future non-YouTube sources), so the affordance stays hidden.
     var canFocusTab: Bool = false
 
-    /// Jellyfin: full transport control plus favorites and a play queue. No
-    /// tab to focus — the overlay's double-click opens the Jellyfin client
+    /// Jellyfin: full transport control plus favorites (a heart) and a play queue.
+    /// No tab to focus — the overlay's double-click opens the Jellyfin client
     /// instead.
     static let jellyfin = SourceCapabilities(
         canPlayPause: true, canNext: true, canPrevious: true,
         canSeek: true, canSetVolume: true, hasFavorites: true, hasQueue: true,
-        canFocusTab: false
+        favoriteStyle: .heart, canFocusTab: false
     )
 
-    /// YouTube bridge default: full transport control, no favorites, no queue.
-    /// Used as the immediate fallback before `/v1/health` is read; `canFocusTab`
-    /// stays conservatively `false` until health confirms the source supports
-    /// it (older bridges won't advertise the capability).
+    /// YouTube bridge default: full transport control plus favorites (the "like",
+    /// a thumbs-up), no queue. Used as the immediate fallback before `/v1/health`
+    /// is read; `canFocusTab` stays conservatively `false` until health confirms
+    /// the source supports it (older bridges won't advertise the capability).
     static let youtube = SourceCapabilities(
         canPlayPause: true, canNext: true, canPrevious: true,
-        canSeek: true, canSetVolume: true, hasFavorites: false, hasQueue: false,
-        canFocusTab: false
+        canSeek: true, canSetVolume: true, hasFavorites: true, hasQueue: false,
+        favoriteStyle: .like, canFocusTab: false
     )
+}
+
+/// Presentation style for a source's favorite affordance: a heart for a library
+/// favorite (Jellyfin), a thumbs-up for a YouTube "like / me gusta".
+nonisolated enum FavoriteStyle: Sendable, Equatable {
+    case heart
+    case like
 }
 
 /// Which backend is currently driving the overlay. Used by the arbiter and the

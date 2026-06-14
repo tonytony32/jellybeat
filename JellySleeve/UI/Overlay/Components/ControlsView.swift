@@ -108,6 +108,29 @@ struct ControlsView: View {
         .focusEffectDisabled()
     }
 
+    /// Glyph for the favorite affordance, chosen by the active source's style:
+    /// a thumbs-up for a YouTube "like / me gusta", a heart for a Jellyfin
+    /// library favorite. Filled when the item is favorited, outline otherwise.
+    private var favoriteSymbolName: String {
+        switch player.capabilities.favoriteStyle {
+        case .like:  return isFavorite ? "hand.thumbsup.fill" : "hand.thumbsup"
+        case .heart: return isFavorite ? "heart.fill" : "heart"
+        }
+    }
+
+    private var favoriteAccessibilityLabel: String {
+        switch player.capabilities.favoriteStyle {
+        case .like:
+            return isFavorite
+                ? String(localized: "Remove like")
+                : String(localized: "Like")
+        case .heart:
+            return isFavorite
+                ? String(localized: "Remove from favorites")
+                : String(localized: "Add to favorites")
+        }
+    }
+
     /// Favorite toggle. Sits at the trailing edge of the transport row (after
     /// the forward button) so it rides the same hover/capsule treatment as the
     /// other controls. Filled when the track is a favorite, an outline
@@ -118,17 +141,13 @@ struct ControlsView: View {
         Button {
             onToggleFavorite()
         } label: {
-            Image(systemName: isFavorite ? "heart.fill" : "heart")
+            Image(systemName: favoriteSymbolName)
                 .font(.system(size: 14, weight: .semibold))
                 .frame(width: 24, height: 24)
                 .overlayHitTarget()
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(
-            isFavorite
-                ? String(localized: "Remove from favorites")
-                : String(localized: "Add to favorites")
-        )
+        .accessibilityLabel(favoriteAccessibilityLabel)
         .scaleEffect(favoriteHovered ? 1.12 : 1.0)
         .onHover { favoriteHovered = $0 }
         .animation(.spring(response: 0.22, dampingFraction: 0.65), value: favoriteHovered)
