@@ -147,11 +147,6 @@ final class PlayerStore {
     /// that is genuinely playing over one merely parked/paused.
     private(set) var jellyfinIsPlaying: Bool = false
 
-    /// Item id of the current Jellyfin pick (even while gated), so the arbiter
-    /// can tell when Jellyfin's playback *changed* for most-recently-changed
-    /// arbitration.
-    private(set) var jellyfinNowPlayingId: String?
-
     /// Called after every Jellyfin `ingest` so the arbiter can re-evaluate which
     /// source should drive, using the refreshed presence signal above.
     var onJellyfinUpdate: (@MainActor () -> Void)?
@@ -170,6 +165,10 @@ final class PlayerStore {
     /// is ignored for this field briefly after a toggle so the optimistic flip
     /// doesn't snap back before the bridge has clicked the button and re-reported.
     private var lastFavoriteCommandAt: Date?
+    /// When the last `focusTab` was dispatched, so a burst of double-clicks on
+    /// the artwork sends at most one focus command per `focusDebounce`.
+    private var lastFocusAt: Date?
+    private static let focusDebounce: TimeInterval = 1.0
     private var anticipatingTask: Task<Void, Never>?
     private var commandFeedbackTask: Task<Void, Never>?
     private var volumeFeedbackTask: Task<Void, Never>?
@@ -445,7 +444,6 @@ final class PlayerStore {
         // drives.
         jellyfinHasNowPlaying = snapshot != nil
         jellyfinIsPlaying = snapshot != nil && !pausedFromServer
-        jellyfinNowPlayingId = snapshot?.itemId
         onJellyfinUpdate?()
 
         // Gated: YouTube is the active source, so don't let Jellyfin write the
@@ -909,6 +907,33 @@ final class PlayerStore {
     private func revertFavorite(itemId: String, to value: Bool) {
         guard let current = currentTrack, current.itemId == itemId else { return }
         currentTrack = current.withFavorite(value)
+    }
+
+    /// Bring the active source's window/tab to the front (the YouTube bridge's
+    /// `focusTab`), wired to a double-click on the artwork. Best-effort and
+    /// asynchronous: the bridge queues it and raises Safari on its next sync
+    /// (≤ ~1 s), so there's no confirmation to wait on.
+    ///
+    /// Capability-gated and debounced so a burst of double-clicks sends at most
+    /// one command per second. Every failure is swallowed — `503` (stale tab),
+    /// `409` (no active player) and a refused connection (bridge idle) are all
+    /// benign here; this is a convenience affordance, not a transport action
+    /// worth a toast. Doesn't gate on `isLinkLive`: that tracks the Jellyfin
+    /// link, which is irrelevant while the YouTube source is driving.
+    func focusSource() async {
+        guard capabilities.canFocusTab else { return }
+        guard let commandSink else { return }
+        if let lastFocusAt,
+           Date().timeIntervalSince(lastFocusAt) < Self.focusDebounce {
+            return
+        }
+        lastFocusAt = Date()
+        do {
+            try await commandSink.focusTab()
+            Self.logger.notice("focusTab dispatched")
+        } catch {
+            Self.logger.debug("focusTab ignored (idle/stale): \(String(describing: error), privacy: .public)")
+        }
     }
 
     private func flashFeedback(_ action: PlaybackAction) {

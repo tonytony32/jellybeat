@@ -52,7 +52,6 @@ struct PlayerStoreSourceGatingTests {
 
         #expect(store.currentTrack == nil)               // shared state untouched
         #expect(store.jellyfinHasNowPlaying == true)     // presence refreshed
-        #expect(store.jellyfinNowPlayingId == "jf-item")
         #expect(notified)
     }
 

@@ -1,0 +1,102 @@
+name: CI
+
+# Compile the app + tests on every push to main and every pull request, plus an
+# (advisory) formatting check. The build job is the gate that protects the
+# branch; the format job is informational.
+#
+# NOTE — why we compile instead of run the test suite:
+# JellySleeve's deployment target is macOS 26.0, but GitHub's hosted macOS
+# runners are still on macOS 15.x. You can BUILD for a 26.0 target on a 15.x
+# host (the 26.x SDK ships with Xcode 26 on the runner), but you cannot RUN a
+# 26.0-targeted test bundle there ("My Mac's macOS 15.x doesn't match the
+# deployment target"). So CI uses `build-for-testing`, which compiles the app
+# AND the test bundle — catching compile errors and Swift 6 strict-concurrency
+# errors, which is most of the value — without executing them. Run the suite
+# locally with `xcodebuild ... test`. Switch the step below from
+# `build-for-testing` to `test` once GitHub ships macOS 26 runners (or if the
+# deployment target is lowered to an OS the hosted runners provide).
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel an in-progress run when a newer commit lands on the same ref, so a
+# rapid push sequence doesn't queue redundant macOS runners.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build & compile tests
+    runs-on: macos-latest
+    steps:
+      # Pinned to a major tag for readability; pin to a full commit SHA if you
+      # want supply-chain-hardened, immutable action references.
+      - uses: actions/checkout@v4
+
+      # JellySleeve uses Swift 6 strict concurrency and the latest SDK, so
+      # build with the newest stable Xcode the runner offers rather than its
+      # (possibly older) default selection.
+      - name: Select latest stable Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      # `build-for-testing` compiles the app target AND the test bundle (so test
+      # code is type-checked and strict-concurrency-checked) without running it
+      # — see the note at the top of this file for why we don't `test` here.
+      - name: Build app + tests (Debug)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project JellySleeve.xcodeproj \
+            -scheme JellySleeve \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            build-for-testing
+
+      # A Release build catches issues hidden behind `#if DEBUG` or release-only
+      # optimizer behavior that the Debug build wouldn't surface.
+      - name: Release build
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project JellySleeve.xcodeproj \
+            -scheme JellySleeve \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            build
+
+  format:
+    name: Format check (advisory)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select latest stable Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      # Apple's official formatter ships inside the Xcode toolchain, so no
+      # external dependency is installed — it's invoked via `xcrun`. The config
+      # is the repo-root `.swift-format` (passed explicitly for clarity).
+      #
+      # Advisory and NON-BLOCKING: the repo has never been run through
+      # `swift-format format`, so a strict gate would fail on ~370 pre-existing,
+      # auto-fixable violations plus ~50 over-length code lines — i.e. on
+      # existing style, not on the change under review. The `|| true` keeps this
+      # check green while still surfacing suggestions in the log. To make it a
+      # real gate: run `swift-format format -i -r JellySleeve JellySleeveTests`,
+      # hand-wrap the long code lines, then drop the `|| true`.
+      - name: swift-format lint (advisory)
+        run: |
+          echo "::group::swift-format suggestions (advisory — does not fail CI)"
+          xcrun swift-format lint --strict --recursive \
+            --configuration .swift-format \
+            JellySleeve JellySleeveTests || true
+          echo "::endgroup::"

@@ -56,7 +56,9 @@ private struct AeroBody: View {
                 size: artworkSize,
                 cornerRadius: 14,
                 shadowOpacity: theme.behavior.shadowOpacity,
-                artworkURL: track.artworkURL
+                artworkURL: track.artworkURL,
+                canFocusTab: store.capabilities.canFocusTab,
+                onFocus: { Task { @MainActor in await store.focusSource() } }
             )
             .overlay(alignment: .bottom) {
                 ControlsView(

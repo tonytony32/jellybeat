@@ -14,6 +14,14 @@ struct ArtworkView: View {
     /// bridge's `artworkUrl`) instead of fetched by id through `ArtworkCache`.
     /// Sources whose artwork is id-based (Jellyfin) leave this `nil`.
     var artworkURL: URL? = nil
+    /// True when the active source can raise its own window/tab (the YouTube
+    /// bridge's `focusTab`). When set, a double-click invokes `onFocus` and the
+    /// cover shows a pointer cursor + "go to the tab" tooltip; when false the
+    /// double-click falls back to opening the Jellyfin client.
+    var canFocusTab: Bool = false
+    /// Invoked on double-click when `canFocusTab` is true. Wired by the theme to
+    /// `PlayerStore.focusSource()`.
+    var onFocus: (() -> Void)? = nil
 
     @Environment(ArtworkCacheProvider.self) private var provider
     @Environment(SettingsStore.self) private var settings
@@ -68,10 +76,15 @@ struct ArtworkView: View {
         .shadow(color: .black.opacity(shadowOpacity), radius: 9, x: 0, y: 4)
         .accessibilityLabel(String(localized: "Album artwork"))
         .accessibilityAddTraits(.isButton)
-        .accessibilityHint(String(localized: "Double-click to open the Jellyfin client"))
-        .help(String(localized: "Double-click to open Jellyfin"))
+        .accessibilityHint(doubleClickHint)
+        .help(doubleClickHint)
+        // Pointer cursor only when the focus affordance is live; the Jellyfin
+        // open-on-double-click fallback keeps the default cursor as before.
+        .pointerStyle(canFocusTab ? .link : nil)
         .onTapGesture(count: 2) {
-            if let url = settings.baseURL {
+            if canFocusTab {
+                onFocus?()
+            } else if let url = settings.baseURL {
                 ClientLauncher.openJellyfin(url)
             }
         }
@@ -80,6 +93,14 @@ struct ArtworkView: View {
         }
         .animation(.easeInOut(duration: 0.4), value: image)
         .animation(.easeInOut(duration: 0.2), value: isLoading)
+    }
+
+    /// Tooltip + accessibility hint, matched to what the double-click does for
+    /// the active source.
+    private var doubleClickHint: String {
+        canFocusTab
+            ? String(localized: "Double-click to go to the YouTube tab")
+            : String(localized: "Double-click to open the Jellyfin client")
     }
 
     private func loadImage() async {
