@@ -351,6 +351,40 @@ struct SourceArbiterTests {
         #expect(autoDecide(both, recency: r, current: .jellyfin) == .youtube)
     }
 
+    // MARK: - Live capability refresh on bridge reconnect
+
+    /// The bridge reconnecting (its feed goes idle→active) while YouTube is
+    /// already the active source and no flip happened triggers a live `/v1/health`
+    /// re-read — so a rebuilt bridge advertising a new capability lands without a
+    /// JellySleeve restart.
+    @Test
+    func refreshesCapabilitiesOnBridgeReconnect() {
+        #expect(SourceArbiter.shouldRefreshOnReconnect(
+            ytActive: true, ytWasActive: false, didFlip: false, active: .youtube
+        ) == true)
+    }
+
+    /// It must NOT refresh in the cases the reconnect rule deliberately excludes.
+    @Test
+    func doesNotRefreshOutsideReconnectEdge() {
+        // Already active (no idle→active edge) — avoids re-fetching every poll.
+        #expect(SourceArbiter.shouldRefreshOnReconnect(
+            ytActive: true, ytWasActive: true, didFlip: false, active: .youtube
+        ) == false)
+        // A flip TO youtube this pass already refreshed — don't double-fetch.
+        #expect(SourceArbiter.shouldRefreshOnReconnect(
+            ytActive: true, ytWasActive: false, didFlip: true, active: .youtube
+        ) == false)
+        // YouTube isn't the active source — its capabilities aren't in play.
+        #expect(SourceArbiter.shouldRefreshOnReconnect(
+            ytActive: true, ytWasActive: false, didFlip: false, active: .jellyfin
+        ) == false)
+        // Going idle (active→idle), not reconnecting.
+        #expect(SourceArbiter.shouldRefreshOnReconnect(
+            ytActive: false, ytWasActive: true, didFlip: false, active: .youtube
+        ) == false)
+    }
+
     // MARK: - Bridge → normalized mapping
 
     private func snapshot(

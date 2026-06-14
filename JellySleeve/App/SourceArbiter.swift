@@ -46,6 +46,11 @@ final class SourceArbiter {
     private var lastFlipAt: Date = .distantPast
     private static let flipDebounce: TimeInterval = 1.0
 
+    /// Whether YouTube's feed was active on the previous pass, so we can detect
+    /// the bridge's idle→active *reconnect* edge and re-read its capabilities
+    /// live (see `shouldRefreshOnReconnect`).
+    private var ytWasActive = false
+
     /// Decision priorities, expressed as two explicit orderings rather than
     /// derived from one list — because the two answers genuinely differ:
     ///  - `homePriority`: when *nothing* is playing, which present-but-idle/paused
@@ -145,7 +150,22 @@ final class SourceArbiter {
             current: activeKind
         )
         let kind = debounced(desired, presence: presence)
-        applyKind(kind)
+        let didFlip = applyKind(kind)
+
+        // Pick up a live capability change without a restart: when the bridge
+        // reconnects — its feed goes idle→active, e.g. after a rebuild/reinstall
+        // — while YouTube is already the active source, re-read `/v1/health`. A
+        // flip TO youtube already refreshes (inside `applyKind`), so this only
+        // fires for the no-flip reconnect, where capabilities would otherwise
+        // stay cached until the next flip (the "had to restart JellySleeve to
+        // see a new bridge capability" papercut).
+        if Self.shouldRefreshOnReconnect(
+            ytActive: yt.active, ytWasActive: ytWasActive,
+            didFlip: didFlip, active: activeKind
+        ) {
+            refreshYouTubeCapabilities()
+        }
+        ytWasActive = yt.active
 
         // Publish the YouTube snapshot only when YouTube is the winner and the
         // wake was YouTube's own (or a selection change) — Jellyfin writes its
@@ -236,12 +256,16 @@ final class SourceArbiter {
         return desired
     }
 
-    private func applyKind(_ kind: SourceKind) {
+    /// Apply the resolved source. Returns `true` if this was an actual flip
+    /// (the active source changed), so the caller can tell a flip-driven
+    /// capability refresh apart from a reconnect-driven one.
+    @discardableResult
+    private func applyKind(_ kind: SourceKind) -> Bool {
         // Gate Jellyfin's writes to the shared state on every pass (idempotent),
         // so the flag always tracks the resolved source.
         player.jellyfinIsActiveSource = (kind == .jellyfin)
 
-        guard kind != activeKind else { return }
+        guard kind != activeKind else { return false }
         Self.logger.notice("Source flip: \(self.activeKind.rawValue, privacy: .public) → \(kind.rawValue, privacy: .public)")
         activeKind = kind
         lastFlipAt = Date()
@@ -256,6 +280,22 @@ final class SourceArbiter {
             player.setCommandSink(nil, capabilities: .jellyfin)
             coordinator.forceRefresh()
         }
+        return true
+    }
+
+    /// Whether to re-read the YouTube source's `/v1/health` on this pass because
+    /// the bridge just *reconnected*. True only when YouTube's feed went
+    /// idle→active (`ytActive && !ytWasActive`) while YouTube is already the
+    /// active source and we did **not** flip this pass (a flip refreshes on its
+    /// own). This is what lets a live bridge update — a rebuild that starts
+    /// advertising a new capability — land without restarting JellySleeve.
+    static func shouldRefreshOnReconnect(
+        ytActive: Bool,
+        ytWasActive: Bool,
+        didFlip: Bool,
+        active: SourceKind
+    ) -> Bool {
+        ytActive && !ytWasActive && !didFlip && active == .youtube
     }
 
     /// Read the YouTube source's self-described capabilities and apply them if
@@ -267,6 +307,7 @@ final class SourceArbiter {
             self.ytFeed.applyCapabilities(caps)
             guard self.activeKind == .youtube else { return }
             self.player.setCommandSink(self.ytClient, capabilities: caps)
+            Self.logger.debug("YouTube capabilities refreshed (canFocusTab=\(caps.canFocusTab, privacy: .public))")
         }
     }
 
