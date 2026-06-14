@@ -13,9 +13,12 @@ import os
 /// publishing its snapshot). On a flip it swaps the command sink + capabilities
 /// so transport actions and capability-gated UI follow the active source.
 ///
-/// Decision (per `docs/youtube-bridge-arbiter-plan.md`): a forced selection wins
-/// outright; in `auto`, the active source drives, and when both are active the
-/// most-recently-changed one wins. With neither active, the last source stays.
+/// Decision (per `docs/architecture.md` §5): a forced selection wins outright;
+/// in `auto`, the genuinely *playing* source drives; ties between several
+/// playing sources go to the most-recently-*activated* one; and when nothing is
+/// playing the overlay falls back to the first present source in `homePriority`
+/// (Jellyfin, the home source). With nothing active at all, the current source
+/// stays put.
 @MainActor
 @Observable
 final class SourceArbiter {
@@ -34,23 +37,33 @@ final class SourceArbiter {
     /// section to mark the active one.
     private(set) var activeKind: SourceKind = .jellyfin
 
-    /// Capabilities of the YouTube source, refreshed from `/v1/health` on a flip
-    /// (defaults to the constant set the bridge advertises).
-    private var ytCapabilities: SourceCapabilities = .youtube
-
     /// Tracks which source was most-recently *activated* for the both-active
     /// tie-break (see `ActivationRecency`). Pure value type, fed each pass.
     private var recency = ActivationRecency()
-
-    /// Previous YouTube activeness, so the arbiter can spot the bridge
-    /// *reconnecting* (idle→active) and re-read its capabilities live — without
-    /// a JellySleeve restart (see `shouldRefreshOnReconnect`).
-    private var ytWasActive = false
 
     /// When the active source last flipped, used to damp oscillation between two
     /// simultaneously-active sources (the plan's "debounce flips slightly").
     private var lastFlipAt: Date = .distantPast
     private static let flipDebounce: TimeInterval = 1.0
+
+    /// Whether YouTube's feed was active on the previous pass, so we can detect
+    /// the bridge's idle→active *reconnect* edge and re-read its capabilities
+    /// live (see `shouldRefreshOnReconnect`).
+    private var ytWasActive = false
+
+    /// Decision priorities, expressed as two explicit orderings rather than
+    /// derived from one list — because the two answers genuinely differ:
+    ///  - `homePriority`: when *nothing* is playing, which present-but-idle/paused
+    ///    source the overlay falls back to. Jellyfin is "home", so pausing YouTube
+    ///    reveals Jellyfin instead of lingering on a paused YouTube cover.
+    ///  - `tiePriority`: when *several* sources are genuinely playing and were
+    ///    activated on the same tick, who wins. YouTube wins the tie (matching the
+    ///    historical `ytActivatedNoOlderThanJf >=` direction).
+    /// A new source slots into both lists; `decide` and `ActivationRecency`
+    /// already generalize over `SourceKind.allCases`. Internal (not private) so
+    /// the test suite can pin the production orderings.
+    static let homePriority: [SourceKind] = [.jellyfin, .youtube]
+    static let tiePriority: [SourceKind] = [.youtube, .jellyfin]
 
     private var observationActive = false
 
@@ -108,12 +121,35 @@ final class SourceArbiter {
     private func reevaluate(trigger: Trigger) {
         let yt = ytFeed.latest ?? .idle
 
+        // Sample every source's presence ONCE per pass into a uniform map, so
+        // recency, the decision, and the debounce all read the same snapshot and
+        // no source is special-cased downstream. `active` = has a session
+        // (playing OR paused); `playing` = genuinely playing.
+        let presence: [SourceKind: SourcePresence] = [
+            .jellyfin: SourcePresence(
+                active: player.jellyfinHasNowPlaying,
+                playing: player.jellyfinIsPlaying
+            ),
+            .youtube: SourcePresence(
+                active: yt.active,
+                playing: yt.active && !yt.isPaused
+            ),
+        ]
+
         // Record each source's activation edge (idle→active). A change *while
         // already active* (auto-advance) does not re-activate, so it can't win
         // the tie-break and steal the overlay.
-        recency.observe(ytActive: yt.active, jfActive: player.jellyfinHasNowPlaying)
+        recency.observe(presence)
 
-        let kind = debounced(resolveActiveKind(yt: yt), yt: yt)
+        let desired = Self.decide(
+            selection: settings.sourceSelection,
+            presence: presence,
+            recency: recency,
+            homePriority: Self.homePriority,
+            tiePriority: Self.tiePriority,
+            current: activeKind
+        )
+        let kind = debounced(desired, presence: presence)
         let didFlip = applyKind(kind)
 
         // Pick up a live capability change without a restart: when the bridge
@@ -151,60 +187,68 @@ final class SourceArbiter {
         }
     }
 
-    private func resolveActiveKind(yt: ExternalPlayback) -> SourceKind {
-        Self.decide(
-            selection: settings.sourceSelection,
-            ytPlaying: yt.active && !yt.isPaused,
-            ytActive: yt.active,
-            jfPlaying: player.jellyfinIsPlaying,
-            jfActive: player.jellyfinHasNowPlaying,
-            ytActivatedNoOlderThanJf: recency.ytActivatedNoOlderThanJf,
-            current: activeKind
-        )
-    }
-
-    /// Pure decision policy (extracted for testing). In order:
+    /// Pure decision policy (extracted for testing), generalized over an
+    /// arbitrary set of sources keyed by `SourceKind`. In order:
     /// 1. A forced selection wins outright.
-    /// 2. Exactly one source genuinely *playing* → it wins (over an idle/paused
-    ///    other). Resolves the common "Jellyfin parked while YouTube plays".
-    /// 3. Both playing → most-recently-*activated* (the source the user started
-    ///    last); auto-advance can't steal because it never re-activates.
-    /// 4. Neither playing → fall back to Jellyfin (the home source) whenever it
-    ///    has a session at all, so pausing/stopping YouTube reveals Jellyfin
-    ///    instead of lingering on a paused YouTube cover. YouTube only holds the
-    ///    overlay here when it is the *only* source present.
-    /// 5. With neither active, the current source stays put.
+    /// 2. Exactly one source genuinely *playing* → it wins (over any idle/paused
+    ///    others). Resolves the common "Jellyfin parked while YouTube plays".
+    /// 3. Several playing → most-recently-*activated* (the source the user
+    ///    started last); auto-advance can't steal because it never re-activates.
+    ///    A same-tick tie breaks by `tiePriority`.
+    /// 4. None playing → fall back to the first source in `homePriority` that has
+    ///    a session, so pausing/stopping the active source reveals the home
+    ///    source instead of lingering on a paused cover.
+    /// 5. With nothing active anywhere, the current source stays put.
     static func decide(
         selection: SourceSelection,
-        ytPlaying: Bool,
-        ytActive: Bool,
-        jfPlaying: Bool,
-        jfActive: Bool,
-        ytActivatedNoOlderThanJf: Bool,
+        presence: [SourceKind: SourcePresence],
+        recency: ActivationRecency,
+        homePriority: [SourceKind],
+        tiePriority: [SourceKind],
         current: SourceKind
     ) -> SourceKind {
         if let forced = selection.forcedKind { return forced }
-        // Exactly one genuinely playing → it wins.
-        if ytPlaying && !jfPlaying { return .youtube }
-        if jfPlaying && !ytPlaying { return .jellyfin }
-        // Both playing → most-recently-activated (auto-advance can't steal).
-        if ytPlaying && jfPlaying {
-            return ytActivatedNoOlderThanJf ? .youtube : .jellyfin
+
+        let playing = SourceKind.allCases.filter { presence[$0]?.playing == true }
+        if playing.count == 1 { return playing[0] }
+        if playing.count > 1 {
+            // Highest activation rank wins; an equal-rank tie breaks by
+            // `tiePriority`. The (rank, tieIndex) ordering is total, so the
+            // winner is unambiguous regardless of which equal element `max`
+            // would otherwise return.
+            if let best = playing.max(by: { a, b in
+                let ra = recency.rank(of: a), rb = recency.rank(of: b)
+                return ra != rb
+                    ? ra < rb
+                    : Self.tieIndex(a, tiePriority) > Self.tieIndex(b, tiePriority)
+            }) {
+                return best
+            }
         }
-        // Neither playing: prefer Jellyfin (home) whenever it has a session.
-        if jfActive { return .jellyfin }
-        if ytActive { return .youtube }
+
+        // None playing: prefer the first present source in the home order.
+        for kind in homePriority where presence[kind]?.active == true {
+            return kind
+        }
+        // Nothing active anywhere → keep the current source (no spurious flip).
         return current
+    }
+
+    /// Position of `kind` in `order`, or `.max` when absent (sorts last).
+    private static func tieIndex(_ kind: SourceKind, _ order: [SourceKind]) -> Int {
+        order.firstIndex(of: kind) ?? .max
     }
 
     /// Damp a tie-break flip (both sources active) that lands within the
     /// debounce window of the last flip, so two simultaneously-active sources
     /// can't oscillate. A forced selection, or the current source going idle,
     /// flips immediately — the window only guards the both-active ambiguity.
-    private func debounced(_ desired: SourceKind, yt: ExternalPlayback) -> SourceKind {
+    /// Reads `currentStillActive` from the same per-pass presence map, so no
+    /// source is special-cased here either.
+    private func debounced(_ desired: SourceKind, presence: [SourceKind: SourcePresence]) -> SourceKind {
         guard desired != activeKind else { return desired }
         if settings.sourceSelection.forcedKind != nil { return desired }
-        let currentStillActive = (activeKind == .youtube) ? yt.active : player.jellyfinHasNowPlaying
+        let currentStillActive = presence[activeKind]?.active ?? false
         guard currentStillActive else { return desired }   // current went idle → flip now
         if Date().timeIntervalSince(lastFlipAt) < Self.flipDebounce {
             return activeKind                              // hold to avoid flapping
@@ -228,7 +272,7 @@ final class SourceArbiter {
 
         switch kind {
         case .youtube:
-            player.setCommandSink(ytClient, capabilities: ytCapabilities)
+            player.setCommandSink(ytClient, capabilities: ytFeed.capabilities)
             refreshYouTubeCapabilities()
         case .jellyfin:
             // Drop the YouTube sink; the per-session Jellyfin sink is rebuilt on
@@ -260,7 +304,7 @@ final class SourceArbiter {
         Task { @MainActor [weak self] in
             guard let self else { return }
             let caps = await self.ytClient.fetchCapabilities()
-            self.ytCapabilities = caps
+            self.ytFeed.applyCapabilities(caps)
             guard self.activeKind == .youtube else { return }
             self.player.setCommandSink(self.ytClient, capabilities: caps)
             Self.logger.debug("YouTube capabilities refreshed (canFocusTab=\(caps.canFocusTab, privacy: .public))")
@@ -283,9 +327,20 @@ final class SourceArbiter {
     }
 }
 
+/// Uniform per-source presence, sampled once per arbitration pass so the
+/// decision logic never special-cases a particular backend. `playing` implies
+/// `active`.
+nonisolated struct SourcePresence: Equatable, Sendable {
+    /// The source has a now-playing item — playing OR paused.
+    let active: Bool
+    /// The source is genuinely playing (active and not paused).
+    let playing: Bool
+}
+
 /// Tracks which source was most-recently *activated* — the idle→active edge,
 /// i.e. the moment the user started it. This is the signal the arbiter's
-/// both-active tie-break consumes.
+/// both-active tie-break consumes. Generalized over an arbitrary set of sources
+/// keyed by `SourceKind`, so adding a source needs no new fields here.
 ///
 /// The crucial property: a source that stays *continuously* active never
 /// re-activates, so its rank doesn't move. A background Jellyfin playlist
@@ -297,23 +352,29 @@ final class SourceArbiter {
 /// Ordering is a monotonic tick rather than wall-clock, so it's deterministic
 /// and immune to clock skew / equal-timestamp ties.
 nonisolated struct ActivationRecency: Equatable, Sendable {
-    private var lastYtActive = false
-    private var lastJfActive = false
-    private var ytRank = 0
-    private var jfRank = 0
+    private var lastActive: [SourceKind: Bool] = [:]
+    private var rank: [SourceKind: Int] = [:]
     private var tick = 0
 
-    /// Feed the current activeness of both sources. Stamps a fresh rank only on
-    /// an idle→active edge.
-    mutating func observe(ytActive: Bool, jfActive: Bool) {
-        if ytActive && !lastYtActive { tick += 1; ytRank = tick }
-        if jfActive && !lastJfActive { tick += 1; jfRank = tick }
-        lastYtActive = ytActive
-        lastJfActive = jfActive
+    /// Feed the current presence of every source. Stamps a fresh, higher rank on
+    /// each source that crossed an idle→active edge since the last call.
+    ///
+    /// Iterates `SourceKind.allCases` so a same-pass double activation resolves
+    /// deterministically every run. DO NOT reorder the enum's cases without
+    /// revisiting the tie semantics this ordering pins.
+    mutating func observe(_ presence: [SourceKind: SourcePresence]) {
+        for kind in SourceKind.allCases {
+            let isActive = presence[kind]?.active ?? false
+            if isActive && !(lastActive[kind] ?? false) {
+                tick += 1
+                rank[kind] = tick
+            }
+            lastActive[kind] = isActive
+        }
     }
 
-    /// True when YouTube activated no earlier than Jellyfin (a tie — including
-    /// the initial state where neither has activated — favors YouTube, matching
-    /// `decide`'s tie-break direction).
-    var ytActivatedNoOlderThanJf: Bool { ytRank >= jfRank }
+    /// Activation rank of `kind`: higher = activated more recently. `0` means the
+    /// source has never activated, so the initial all-zero state is a tie (the
+    /// caller breaks it with `tiePriority`).
+    func rank(of kind: SourceKind) -> Int { rank[kind] ?? 0 }
 }

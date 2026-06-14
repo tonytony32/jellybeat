@@ -3,8 +3,8 @@ import Observation
 import os
 
 /// Normalized playback state produced by a non-Jellyfin source, ready to hand to
-/// `PlayerStore.applyExternalSnapshot`. The arbiter reads `active` / `changeKey`
-/// to decide which source drives, and forwards the rest when this source wins.
+/// `PlayerStore.applyExternalSnapshot`. The arbiter reads `active` to decide
+/// which source drives, and forwards the rest when this source wins.
 nonisolated struct ExternalPlayback: Equatable, Sendable {
     /// The mapped now-playing snapshot, or `nil` when idle.
     let track: TrackSnapshot?
@@ -12,13 +12,9 @@ nonisolated struct ExternalPlayback: Equatable, Sendable {
     let volume: Int?
     /// Whether the source is currently active (something playing/paused).
     let active: Bool
-    /// Identity + transport fingerprint, so the arbiter can tell when playback
-    /// *changed* (new video or play/pause flip) for most-recently-changed
-    /// arbitration, without comparing every field.
-    let changeKey: String
 
     static let idle = ExternalPlayback(
-        track: nil, isPaused: false, volume: nil, active: false, changeKey: "idle"
+        track: nil, isPaused: false, volume: nil, active: false
     )
 }
 
@@ -46,6 +42,12 @@ final class YouTubeBridgeFeed {
 
     /// Latest mapped state. `nil` until the first poll completes.
     private(set) var latest: ExternalPlayback?
+
+    /// The source's self-described capabilities, read from `/v1/health` on a
+    /// flip. Owned here (not on the arbiter) so capability state lives with the
+    /// feed it describes; the arbiter installs it into `PlayerStore` on a flip.
+    /// Defaults to the YouTube constant set until a health read confirms.
+    private(set) var capabilities: SourceCapabilities = .youtube
 
     /// Invoked after each poll so the owner (arbiter) can re-evaluate the active
     /// source against the refreshed `latest`.
@@ -78,6 +80,12 @@ final class YouTubeBridgeFeed {
     /// a flip so the overlay repopulates without a 1 s lag.
     func forceRefresh() async {
         await poll()
+    }
+
+    /// Replace the cached capabilities with a fresh read (the arbiter calls this
+    /// after fetching `/v1/health` on a flip to YouTube).
+    func applyCapabilities(_ caps: SourceCapabilities) {
+        capabilities = caps
     }
 
     private func runLoop() async {
@@ -125,8 +133,7 @@ final class YouTubeBridgeFeed {
             track: track,
             isPaused: isPaused,
             volume: volume,
-            active: true,
-            changeKey: "\(itemId)|\(isPaused ? "paused" : "playing")"
+            active: true
         )
     }
 
