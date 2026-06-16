@@ -21,7 +21,7 @@ assignees: ''
 ---
 
 **Heads up:** before opening, please check [the no-goals list in the
-plan](../../docs/PLAN.md) (section 7) — JellySleeve is intentionally
+plan](../../docs/plans/PLAN.md) (section 7) — JellySleeve is intentionally
 scoped to a single backend (Jellyfin) and does not aim to play audio
 locally, scrobble client-side, sync via iCloud, or ship on the Mac App
 Store. Requests that contradict the plan's principles will be closed
