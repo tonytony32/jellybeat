@@ -1,7 +1,7 @@
 # JellySleeve — Recomendaciones y best practices
 
 Guía para reconstruir el proyecto desde cero sin repetir los errores que ya
-costó corregir. Complementa a [`PLAN.md`](PLAN.md) (el *qué* y el orden de
+costó corregir. Complementa a [`PLAN.md`](plans/PLAN.md) (el *qué* y el orden de
 fases) explicando el *cómo*: las decisiones de diseño que hacen el código
 testeable, concurrente-seguro y fácil de evolucionar.
 

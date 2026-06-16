@@ -17,8 +17,8 @@ first. Code against that normalized contract, **not** against YouTube-specific s
 - **Automatic** (default): if the YouTube bridge is *active* (something playing/paused in Safari,
   fresh within 3 s) → show YouTube. Otherwise → Jellyfin. If both are active, prefer the
   **most-recently-changed** source. *(This is the original plan; the shipped policy refined
-  "most-recently-changed" to most-recently-**activated** — see `architecture.md` §5 for the
-  current behavior.)*
+  "most-recently-changed" to most-recently-**activated** — see
+  [`architecture.md`](../architecture.md) §5 for the current behavior.)*
 - **Override**: a "Source" section in the `MenuBarExtra` menu — **Automatic / Jellyfin /
   YouTube** with a ✓ on the active one. Persisted. Shows which source is currently driving.
 

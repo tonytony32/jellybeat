@@ -4,7 +4,7 @@ Reference for how JellySleeve is put together, with emphasis on the
 **multi-source playback** system (Jellyfin + YouTube bridge, arbitrated). For
 the *why* behind the conventions see [`BEST_PRACTICES.md`](BEST_PRACTICES.md);
 for the original feature plan see
-[`youtube-bridge-arbiter-plan.md`](youtube-bridge-arbiter-plan.md).
+[`youtube-bridge-arbiter-plan.md`](plans/youtube-bridge-arbiter-plan.md).
 
 ## 1. What it is
 

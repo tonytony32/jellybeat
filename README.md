@@ -97,9 +97,13 @@ JellySleeve/                  # Sources
   Assets.xcassets             # AppIcon, AccentColor, JellyfinLogo
   Resources/                  # placeholder
 JellySleeveTests/             # Swift Testing target with Jellyfin response fixtures
-docs/
-  PLAN.md                     # The implementation plan this project followed
-  BEST_PRACTICES.md           # Architecture + best-practices guide for a rebuild
+docs/                         # see docs/README.md for the full map
+  architecture.md             # current architecture (multi-source playback)
+  loopback-source-abi-v1.md   # the third-party source ABI contract
+  BEST_PRACTICES.md           # architecture + best-practices guide for a rebuild
+  MAINTENANCE.md              # internal maintenance policy
+  plans/                      # historical implementation plans
+  visualizations/             # standalone HTML diagrams
 LICENSE                       # AGPL-3.0
 ```
 

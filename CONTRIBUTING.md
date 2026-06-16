@@ -8,7 +8,7 @@ expectations:
   the bandwidth.
 - No CLA. By submitting a PR you agree it can ship under the project's
   AGPL-3.0 licence.
-- Scope is fixed by [`docs/PLAN.md`](docs/PLAN.md). Features that
+- Scope is fixed by [`docs/plans/PLAN.md`](docs/plans/PLAN.md). Features that
   contradict the plan's no-goals (multi-server support, local audio
   playback, scrobble from the client, iCloud sync, Mac App Store
   distribution) will be politely declined.

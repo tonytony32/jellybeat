@@ -20,7 +20,7 @@ Internal notes — not promises to the community.
 - Acceptance criteria, in order:
   1. The existing test suite stays green
   2. The change doesn't break a documented feature
-  3. The change is aligned with `docs/PLAN.md`, in particular §7
+  3. The change is aligned with `docs/plans/PLAN.md`, in particular §7
      (no-goals) and the architectural decisions in §2-§5
   4. The diff is reasonably small / focused
 - No CLA. By submitting, the contributor agrees their work ships under

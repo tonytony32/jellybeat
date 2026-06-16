@@ -4,6 +4,7 @@
 .LSOverride
 Icon?
 ._*
+docs/themes
 
 # Xcode
 build/
