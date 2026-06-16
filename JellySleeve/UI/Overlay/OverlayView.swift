@@ -292,8 +292,8 @@ private struct VolumeFeedbackView: View {
 }
 
 /// Ambient idle state: the window shrinks to artwork-size (see
-/// `AppDelegate.applyWindowSizeForCurrentState`) and shows a large Jellyfin
-/// logo as a launch affordance. The logo stays visible at all times but at a
+/// `AppDelegate.applyWindowSizeForCurrentState`) and shows a large pair of
+/// beamed eighth notes (♫) as a launch affordance. The glyph stays visible at all times but at a
 /// subtle, low opacity; hovering brings it to full strength (and the
 /// surrounding glass fades in via `chromeOpacity`). Tapping launches the
 /// configured Jellyfin URL via `NSWorkspace.open`, which on macOS picks the
@@ -316,7 +316,7 @@ private struct NothingPlayingView: View {
             ZStack(alignment: snapState.alignment) {
                 Color.clear.contentShape(Rectangle())
 
-                Image("JellyfinLogo")
+                Image("AmbientNotes")
                     .renderingMode(.template)
                     .resizable()
                     .scaledToFit()
