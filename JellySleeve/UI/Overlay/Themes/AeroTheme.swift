@@ -12,7 +12,11 @@ struct AeroTheme: OverlayTheme {
         orientation: .vertical,
         artworkSize: 260,
         controlsPosition: .overlayBottom,
-        windowSize: CGSize(width: 300, height: 420),
+        // Height hugs the actual content (artwork 260 + info + progress +
+        // padding ≈ 360pt). A taller window left the centred column floating
+        // with ~30pt of dead space below the progress bar, so the bar sat too
+        // far above the screen's bottom edge when the overlay was snapped low.
+        windowSize: CGSize(width: 300, height: 372),
         padding: 14,
         cornerRadius: 22
     )
