@@ -403,11 +403,14 @@ final class PlayerStore {
         //    legitimately stops heartbeating, and minimizing it stops it
         //    sooner. Dropping it after 60 s is the bug that flips the
         //    overlay to ambient mode while the user's track is merely
-        //    paused. Give paused sessions a generous window so they survive
-        //    being parked & minimized, while still self-healing eventually
-        //    if the tab was actually closed while paused.
+        //    paused. Give paused sessions a wider window so a brief
+        //    pause-and-glance-away survives, while still self-healing if the
+        //    tab/app was actually closed while paused (e.g. Safari quit,
+        //    which the Jellyfin server doesn't report for minutes). Dropping
+        //    is cheap: resuming in the browser re-populates the overlay on
+        //    the next heartbeat, so we don't need to hold a ghost cover long.
         let playingRecency: TimeInterval = 60
-        let pausedRecency: TimeInterval = 15 * 60
+        let pausedRecency: TimeInterval = 3 * 60
         let mine = sessions.filter { session in
             guard session.userId == userId, session.nowPlayingItem != nil else {
                 return false
