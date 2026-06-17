@@ -40,14 +40,14 @@ struct PlayerStoreTests {
         )
     }
 
-    /// A paused session whose heartbeat went silent ~5 min ago (e.g. the web
-    /// player was paused and minimized) must stay tracked — the overlay should
-    /// keep showing the track, not flip to ambient mode.
+    /// A paused session whose heartbeat went silent ~2 min ago (e.g. the web
+    /// player was paused and the user glanced away) must stay tracked — the
+    /// overlay should keep showing the track, not flip to ambient mode.
     @Test
     func keepsPausedSessionThatStoppedHeartbeating() {
         let store = PlayerStore()
         store.ingest(
-            sessions: [session(id: "s1", secondsSinceActivity: 5 * 60, isPaused: true)],
+            sessions: [session(id: "s1", secondsSinceActivity: 2 * 60, isPaused: true)],
             userId: Self.userId
         )
         #expect(store.currentTrack != nil)
@@ -67,13 +67,14 @@ struct PlayerStoreTests {
         #expect(store.currentTrack == nil)
     }
 
-    /// A paused session that's been silent past the generous paused window is
-    /// treated as a tab closed while paused, and finally cleared.
+    /// A paused session that's been silent past the paused window is treated
+    /// as a tab/app closed while paused (e.g. Safari quit), and finally
+    /// cleared so the overlay doesn't sit on a ghost cover.
     @Test
     func dropsPausedSessionPastGenerousWindow() {
         let store = PlayerStore()
         store.ingest(
-            sessions: [session(id: "s1", secondsSinceActivity: 20 * 60, isPaused: true)],
+            sessions: [session(id: "s1", secondsSinceActivity: 5 * 60, isPaused: true)],
             userId: Self.userId
         )
         #expect(store.currentTrack == nil)
