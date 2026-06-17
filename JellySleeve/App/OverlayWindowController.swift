@@ -139,7 +139,10 @@ final class OverlayWindowController: NSObject {
         window.hasShadow = true
         // canJoinAllSpaces: visible in every Space.
         // fullScreenAuxiliary: stays above apps in fullscreen.
-        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        // stationary: pinned like a desktop widget — Mission Control and
+        // "Show Desktop" leave it in place instead of sweeping it off-screen,
+        // in every window level (always-on-top / normal / behind).
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         window.isReleasedWhenClosed = false
 
         let hosting = ClickableHostingView(
