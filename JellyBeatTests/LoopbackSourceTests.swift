@@ -80,6 +80,38 @@ struct LoopbackSourceTests {
         #expect(loaded.first?.port == 8980)
     }
 
+    /// Dual-path scan (post-rename back-compat): the current and legacy Sources
+    /// dirs are scanned with ONE shared de-dup set. A source present in both
+    /// loads once with the *new* dir winning; new-only and legacy-only sources
+    /// each load (so a not-yet-updated pre-rename bridge stays discoverable).
+    @Test
+    func dualPathScanSharesDedupAndPrefersNewDir() throws {
+        let newDir = try makeTempDir()
+        let legacyDir = try makeTempDir()
+        defer {
+            try? FileManager.default.removeItem(at: newDir)
+            try? FileManager.default.removeItem(at: legacyDir)
+        }
+
+        // Same id in both dirs (different displayName + port) → new dir wins, once.
+        try write(#"{"abi":"loopback-source/1","id":"com.example.dup","displayName":"NEW","port":9000}"#,
+                  to: newDir, as: "dup.jellysource")
+        try write(#"{"abi":"loopback-source/1","id":"com.example.dup","displayName":"OLD","port":9001}"#,
+                  to: legacyDir, as: "dup.jellysource")
+        try write(manifest(id: "com.example.newonly", port: 8990), to: newDir, as: "newonly.jellysource")
+        try write(manifest(id: "com.example.legacyonly", port: 8991), to: legacyDir, as: "legacyonly.jellysource")
+
+        let loaded = SourceManifestLoader.load(directories: [newDir, legacyDir])
+
+        #expect(loaded.count == 3)
+        let dup = loaded.filter { $0.id == "com.example.dup" }
+        #expect(dup.count == 1)                       // shared de-dup, not per-dir
+        #expect(dup.first?.displayName == "NEW")      // new dir wins
+        #expect(dup.first?.port == 9000)
+        #expect(loaded.contains { $0.id == "com.example.newonly" })
+        #expect(loaded.contains { $0.id == "com.example.legacyonly" })   // pre-rename bridge still found
+    }
+
     @Test
     func loaderMissingDirectoryYieldsEmpty() {
         let missing = FileManager.default.temporaryDirectory

@@ -28,42 +28,64 @@ nonisolated enum SourceManifestLoader {
 
     /// `~/Library/Application Support/software.trypwood.jellybeat/Sources`.
     static var defaultDirectory: URL? {
+        sourcesDirectory(for: "software.trypwood.jellybeat")
+    }
+
+    /// Pre-rename location `~/Library/Application Support/software.trypwood.jellysleeve/Sources`.
+    /// JellyBeat shipped as **JellySleeve** through v0.2.x; bridges installed
+    /// against the old build still write their `*.jellysource` manifests here, so
+    /// discovery scans it too (after `defaultDirectory`, which wins collisions).
+    /// The old `jellysleeve` literal is retained deliberately — do NOT rename it.
+    /// See `IdentityMigrator`.
+    static var legacyDirectory: URL? {
+        sourcesDirectory(for: "software.trypwood.jellysleeve")
+    }
+
+    /// Directories scanned at launch, in precedence order: the current location
+    /// first (it wins `id`/`port` collisions), then the pre-rename one so
+    /// not-yet-updated bridges keep working without an ABI bump.
+    static var allDirectories: [URL?] { [defaultDirectory, legacyDirectory] }
+
+    private static func sourcesDirectory(for bundleID: String) -> URL? {
         FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first?
-            .appendingPathComponent("software.trypwood.jellybeat/Sources", isDirectory: true)
+            .appendingPathComponent("\(bundleID)/Sources", isDirectory: true)
     }
 
     private static let allowedIDCharacters =
         CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789._-")
 
-    /// Load and validate every `*.jellysource` in `directory`. A missing
-    /// directory yields `[]` (not an error). The result is de-duplicated by `id`
-    /// and by `port` (first valid file, in sorted filename order, wins) so the
-    /// registry sees a clean, deterministic set.
+    /// Load and validate every `*.jellysource` in a single `directory`. Kept for
+    /// callers (and tests) that scan one location; delegates to the multi-dir
+    /// loader. A missing directory yields `[]` (not an error).
     static func load(directory: URL?) -> [LoopbackSourceManifest] {
-        guard let directory,
-              let entries = try? FileManager.default.contentsOfDirectory(
-                at: directory, includingPropertiesForKeys: nil
-              ) else {
-            return []
-        }
+        load(directories: [directory])
+    }
 
-        let files = entries
-            .filter { $0.pathExtension == "jellysource" }
-            .sorted { $0.lastPathComponent < $1.lastPathComponent }
-
+    /// Load and validate every `*.jellysource` across `directories`, with a
+    /// SINGLE de-dup set shared across all of them: the first valid manifest for
+    /// a given `id`/`port` wins, so earlier directories take precedence. Within a
+    /// directory, files are processed in sorted filename order. A missing or
+    /// unreadable directory contributes nothing (never an error). Pass the
+    /// current Sources dir before the legacy one (see `allDirectories`) so a
+    /// post-rename manifest shadows a stale pre-rename copy of the same source.
+    static func load(directories: [URL?]) -> [LoopbackSourceManifest] {
         var seenIDs = Set<String>()
         var seenPorts = Set<Int>()
         var result: [LoopbackSourceManifest] = []
 
-        for file in files {
-            guard let data = try? Data(contentsOf: file),
-                  let manifest = try? JSONDecoder().decode(LoopbackSourceManifest.self, from: data) else {
-                logger.warning("Ignoring unreadable source manifest \(file.lastPathComponent, privacy: .public)")
-                continue
-            }
-            guard let reason = validationFailure(manifest) else {
+        for directory in directories {
+            for file in jellysourceFiles(in: directory) {
+                guard let data = try? Data(contentsOf: file),
+                      let manifest = try? JSONDecoder().decode(LoopbackSourceManifest.self, from: data) else {
+                    logger.warning("Ignoring unreadable source manifest \(file.lastPathComponent, privacy: .public)")
+                    continue
+                }
+                if let reason = validationFailure(manifest) {
+                    logger.warning("Ignoring source manifest \(file.lastPathComponent, privacy: .public): \(reason, privacy: .public)")
+                    continue
+                }
                 if seenIDs.contains(manifest.id) {
                     logger.warning("Ignoring source manifest \(file.lastPathComponent, privacy: .public): duplicate id \(manifest.id, privacy: .public)")
                     continue
@@ -75,11 +97,23 @@ nonisolated enum SourceManifestLoader {
                 seenIDs.insert(manifest.id)
                 seenPorts.insert(manifest.port)
                 result.append(manifest)
-                continue
             }
-            logger.warning("Ignoring source manifest \(file.lastPathComponent, privacy: .public): \(reason, privacy: .public)")
         }
         return result
+    }
+
+    /// `*.jellysource` files in `directory`, sorted by filename for determinism.
+    /// A missing/unreadable directory (or `nil`) yields `[]`.
+    private static func jellysourceFiles(in directory: URL?) -> [URL] {
+        guard let directory,
+              let entries = try? FileManager.default.contentsOfDirectory(
+                at: directory, includingPropertiesForKeys: nil
+              ) else {
+            return []
+        }
+        return entries
+            .filter { $0.pathExtension == "jellysource" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
     /// `nil` when the manifest is valid, else a human-readable reason for the log.
