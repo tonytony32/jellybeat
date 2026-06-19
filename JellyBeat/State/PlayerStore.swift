@@ -74,9 +74,9 @@ final class PlayerStore {
     var selectedSessionId: String? {
         didSet {
             if selectedSessionId == nil {
-                UserDefaults.standard.removeObject(forKey: Self.selectedSessionKey)
+                defaults.removeObject(forKey: Self.selectedSessionKey)
             } else {
-                UserDefaults.standard.set(selectedSessionId, forKey: Self.selectedSessionKey)
+                defaults.set(selectedSessionId, forKey: Self.selectedSessionKey)
             }
         }
     }
@@ -209,8 +209,13 @@ final class PlayerStore {
     private static let trackClearDebounce: UInt64 = 1_500_000_000
     private static let selectedSessionKey = "playerStore.selectedSessionId"
 
-    init() {
-        self.selectedSessionId = UserDefaults.standard.string(forKey: Self.selectedSessionKey)
+    /// Injected so the hosted test runner reads/writes a throwaway suite rather
+    /// than the user's real `.standard` domain. Production passes `.standard`.
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        self.selectedSessionId = defaults.string(forKey: Self.selectedSessionKey)
     }
 
     // MARK: Configuration

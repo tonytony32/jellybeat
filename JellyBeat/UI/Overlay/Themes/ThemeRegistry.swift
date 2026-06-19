@@ -14,11 +14,16 @@ import SwiftUI
 final class ThemeRegistry {
     private static let storageKey = "selectedThemeId"
 
+    /// Injected so the hosted test runner can build this against a throwaway
+    /// suite instead of writing `selectedThemeId` into the user's real
+    /// `.standard` domain on first launch. Production passes `.standard`.
+    private let defaults: UserDefaults
+
     let builtIn: [any OverlayTheme]
 
     var selectedId: String {
         didSet {
-            UserDefaults.standard.set(selectedId, forKey: Self.storageKey)
+            defaults.set(selectedId, forKey: Self.storageKey)
         }
     }
 
@@ -26,7 +31,8 @@ final class ThemeRegistry {
         builtIn.first(where: { $0.id == selectedId }) ?? builtIn[0]
     }
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         // Display order. "Stack" was retired; the default theme used to be
         // called "Elegant" and is now "Standard". We migrate any persisted
         // id below.
@@ -36,12 +42,12 @@ final class ThemeRegistry {
             MinimTheme(),
             AeroTheme(),
         ]
-        let stored = UserDefaults.standard.string(forKey: Self.storageKey)
+        let stored = defaults.string(forKey: Self.storageKey)
         switch stored {
         case nil, "elegant", "stack":
             // Map the renamed / retired ids to the new default.
             self.selectedId = "standard"
-            UserDefaults.standard.set("standard", forKey: Self.storageKey)
+            defaults.set("standard", forKey: Self.storageKey)
         case let id?:
             self.selectedId = id
         }

@@ -29,11 +29,18 @@ final class SettingsStore {
         category: "state"
     )
 
+    /// Backing stores, injected so unit tests (and the hosted test runner) run
+    /// against a throwaway `UserDefaults` suite and an in-memory Keychain rather
+    /// than the user's real `.standard` domain / login Keychain. Production
+    /// passes the defaults (`.standard`, `SystemKeychain`).
+    private let defaults: UserDefaults
+    private let keychain: any APIKeyKeychain
+
     // MARK: Persisted scalars
 
     var baseURLString: String {
         didSet {
-            UserDefaults.standard.set(
+            defaults.set(
                 baseURLString.trimmingCharacters(in: .whitespacesAndNewlines),
                 forKey: Keys.baseURL
             )
@@ -42,7 +49,7 @@ final class SettingsStore {
 
     var userId: String {
         didSet {
-            UserDefaults.standard.set(
+            defaults.set(
                 userId.trimmingCharacters(in: .whitespacesAndNewlines),
                 forKey: Keys.userId
             )
@@ -51,13 +58,13 @@ final class SettingsStore {
 
     var allowSelfSigned: Bool {
         didSet {
-            UserDefaults.standard.set(allowSelfSigned, forKey: Keys.allowSelfSigned)
+            defaults.set(allowSelfSigned, forKey: Keys.allowSelfSigned)
         }
     }
 
     var refreshRate: TimeInterval {
         didSet {
-            UserDefaults.standard.set(refreshRate, forKey: Keys.refreshRate)
+            defaults.set(refreshRate, forKey: Keys.refreshRate)
         }
     }
 
@@ -65,7 +72,7 @@ final class SettingsStore {
 
     var appPresence: AppPresence {
         didSet {
-            UserDefaults.standard.set(appPresence.rawValue, forKey: Keys.appPresence)
+            defaults.set(appPresence.rawValue, forKey: Keys.appPresence)
         }
     }
 
@@ -75,7 +82,7 @@ final class SettingsStore {
     /// so the menu-bar binding in `JellyBeatApp` reacts to changes.
     var sourceSelection: SourceSelection {
         didSet {
-            UserDefaults.standard.set(sourceSelection.rawValue, forKey: Keys.sourceSelection)
+            defaults.set(sourceSelection.rawValue, forKey: Keys.sourceSelection)
         }
     }
 
@@ -97,13 +104,13 @@ final class SettingsStore {
 
     var windowLevel: OverlayWindowLevel {
         didSet {
-            UserDefaults.standard.set(windowLevel.rawValue, forKey: Keys.windowLevel)
+            defaults.set(windowLevel.rawValue, forKey: Keys.windowLevel)
         }
     }
 
     var windowOpacity: Double {
         didSet {
-            UserDefaults.standard.set(windowOpacity, forKey: Keys.windowOpacity)
+            defaults.set(windowOpacity, forKey: Keys.windowOpacity)
         }
     }
 
@@ -114,7 +121,7 @@ final class SettingsStore {
     /// current value between locations atomically.
     var storeApiKeyInKeychain: Bool {
         didSet {
-            UserDefaults.standard.set(storeApiKeyInKeychain, forKey: Keys.storeApiKeyInKeychain)
+            defaults.set(storeApiKeyInKeychain, forKey: Keys.storeApiKeyInKeychain)
             if oldValue != storeApiKeyInKeychain {
                 persistAPIKey()
             }
@@ -161,8 +168,9 @@ final class SettingsStore {
 
     // MARK: Init
 
-    init() {
-        let defaults = UserDefaults.standard
+    init(defaults: UserDefaults = .standard, keychain: any APIKeyKeychain = SystemKeychain()) {
+        self.defaults = defaults
+        self.keychain = keychain
 
         self.appPresence = AppPresence(rawValue: defaults.string(forKey: Keys.appPresence) ?? "") ?? .dockAndMenuBar
         self.sourceSelection = SourceSelection(rawValue: defaults.string(forKey: Keys.sourceSelection) ?? "") ?? .auto
@@ -201,12 +209,12 @@ final class SettingsStore {
             let inKeychain = defaults.bool(forKey: Keys.storeApiKeyInKeychain)
             self.storeApiKeyInKeychain = inKeychain
             self.apiKey = inKeychain
-                ? (KeychainHelper.load() ?? "")
+                ? (keychain.load() ?? "")
                 : (defaults.string(forKey: Keys.apiKey) ?? "")
         } else {
             // First launch on this version — migrate to the UserDefaults default.
             let plain = defaults.string(forKey: Keys.apiKey) ?? ""
-            let migrated = plain.isEmpty ? (KeychainHelper.load() ?? "") : plain
+            let migrated = plain.isEmpty ? (keychain.load() ?? "") : plain
             self.storeApiKeyInKeychain = false
             self.apiKey = migrated
             if migrated.isEmpty {
@@ -215,7 +223,7 @@ final class SettingsStore {
                 defaults.set(migrated, forKey: Keys.apiKey)
                 Self.logger.notice("Migrated API key to UserDefaults (default storage)")
             }
-            try? KeychainHelper.delete()
+            try? keychain.delete()
             defaults.removeObject(forKey: Keys.useKeychain)
             defaults.removeObject(forKey: Keys.storeApiKeyInUserDefaults)
             defaults.set(false, forKey: Keys.storeApiKeyInKeychain)
@@ -228,22 +236,21 @@ final class SettingsStore {
     /// `storeApiKeyInKeychain` and clear the other location.
     /// Empty keys are treated as "delete from both".
     private func persistAPIKey() {
-        let defaults = UserDefaults.standard
         if apiKey.isEmpty {
-            try? KeychainHelper.delete()
+            try? keychain.delete()
             defaults.removeObject(forKey: Keys.apiKey)
             return
         }
         if storeApiKeyInKeychain {
             do {
-                try KeychainHelper.save(apiKey: apiKey)
+                try keychain.save(apiKey: apiKey)
             } catch {
                 Self.logger.error("Failed to persist API key to Keychain: \(String(describing: error), privacy: .public)")
             }
             defaults.removeObject(forKey: Keys.apiKey)
         } else {
             defaults.set(apiKey, forKey: Keys.apiKey)
-            try? KeychainHelper.delete()
+            try? keychain.delete()
         }
     }
 
@@ -273,14 +280,14 @@ final class SettingsStore {
     /// setups remember a separate position per screen (plan §6 Fase 6).
     func overlayPosition(forDisplay displayID: UInt32) -> CGPoint? {
         let key = Self.positionKey(for: displayID)
-        guard let array = UserDefaults.standard.array(forKey: key) as? [Double],
+        guard let array = defaults.array(forKey: key) as? [Double],
               array.count == 2 else { return nil }
         return CGPoint(x: array[0], y: array[1])
     }
 
     func setOverlayPosition(_ point: CGPoint, forDisplay displayID: UInt32) {
         let key = Self.positionKey(for: displayID)
-        UserDefaults.standard.set([Double(point.x), Double(point.y)], forKey: key)
+        defaults.set([Double(point.x), Double(point.y)], forKey: key)
     }
 
     private static func positionKey(for displayID: UInt32) -> String {
@@ -293,11 +300,11 @@ final class SettingsStore {
     /// server. Required as a query parameter on `/socket` so the server can
     /// track our connection. Generated lazily on first use and persisted.
     var deviceId: String {
-        if let stored = UserDefaults.standard.string(forKey: Self.deviceIdKey) {
+        if let stored = defaults.string(forKey: Self.deviceIdKey) {
             return stored
         }
         let fresh = UUID().uuidString
-        UserDefaults.standard.set(fresh, forKey: Self.deviceIdKey)
+        defaults.set(fresh, forKey: Self.deviceIdKey)
         return fresh
     }
 
