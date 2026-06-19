@@ -18,8 +18,9 @@ import os
 /// Decision (per `docs/architecture.md` §5): a forced selection wins outright;
 /// in `auto`, the genuinely *playing* source drives; ties between several playing
 /// sources go to the most-recently-*activated* one; and when nothing is playing
-/// the overlay falls back to the first present source in the registry's
-/// `homePriority` (Jellyfin, the home source). With nothing active at all, the
+/// the overlay sticks to the current source while it still has a (paused) session,
+/// only falling back to the registry's `homePriority` (Jellyfin, the home source)
+/// once the current source goes fully idle. With nothing active at all, the
 /// current source stays put.
 @MainActor
 @Observable
@@ -211,9 +212,12 @@ final class SourceArbiter {
     /// 3. Several playing → most-recently-*activated* (the source the user started
     ///    last); auto-advance can't steal because it never re-activates. A
     ///    same-tick tie breaks by `tiePriority`.
-    /// 4. None playing → fall back to the first source in `homePriority` that has
-    ///    a session, so pausing/stopping the active source reveals the home source
-    ///    instead of lingering on a paused cover.
+    /// 4. None playing → "sticky pause": keep the current source while it still has
+    ///    a (paused) session, so pausing what you're using doesn't hand the overlay
+    ///    to a source merely parked in the background. Only once the current source
+    ///    goes fully idle (stopped / closed) do we reveal the first source in
+    ///    `homePriority` that has a session — so *stopping* the active source still
+    ///    surfaces the home source.
     /// 5. With nothing active anywhere, the current source stays put.
     static func decide(
         selection: SourceSelection,
@@ -241,7 +245,14 @@ final class SourceArbiter {
             }
         }
 
-        // None playing: prefer the first present source in the home order.
+        // None playing. "Sticky pause": keep the current source while it still has
+        // a (paused) session, so pausing what you're actually using never hands the
+        // overlay to a source merely parked in the background (the reported bug:
+        // pausing YouTube while a long-paused Jellyfin session lingers made the
+        // Jellyfin cover hijack the overlay). Only once the current source goes
+        // fully idle (stopped / tab closed) do we reveal the first present source in
+        // the home order — so *stopping* YouTube still surfaces a parked Jellyfin.
+        if presence[current]?.active == true { return current }
         for kind in homePriority where presence[kind]?.active == true {
             return kind
         }
