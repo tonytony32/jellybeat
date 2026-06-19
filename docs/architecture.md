@@ -234,9 +234,10 @@ the post-command "didn't respond" check) is **preserved** and now source-agnosti
 
 ## 8. Settings & menu
 
-- `SettingsStore.sourceSelection` (`auto` | `jellyfin` | `youtube`), persisted in
-  `UserDefaults` (mirrors the `appPresence`/`@AppStorage` pattern so the menu
-  binding reacts).
+- `SettingsStore.sourceSelection` — `auto` or a specific source id (`jellyfin`,
+  `youtube`, or any plugin id); an open `SourceSelection` value persisted in
+  `UserDefaults` by `rawValue` (mirrors the `appPresence`/`@AppStorage` pattern
+  so the menu binding reacts).
 - The menu-bar "Source" section is an inline `Picker` bound to `sourceSelection`
   (radio ✓), and in `auto` its label notes the currently-driving
   `arbiter.activeKind`.
