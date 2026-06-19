@@ -8,9 +8,10 @@ independently for Jellyfin — no AppleScript, no Apple Music dependency.
 
 [sleeve]: https://replay.software/sleeve
 
-> **Status — v0.2.0-beta.** Functional multi-source milestone. Tagged source
-> betas only — not packaged for distribution: no Developer ID signing, no
-> notarised DMG.
+> **Status — v0.2.1-beta.** Multi-source milestone, refined: a formal
+> third-party loopback plugin ABI, a Source-first menu bar with faithful theme
+> previews, and a round of overlay/reliability fixes. Tagged source betas only —
+> not packaged for distribution: no Developer ID signing, no notarised DMG.
 
 ## What it does
 
