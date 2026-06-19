@@ -4,7 +4,7 @@ Guidance for AI agents working in this repository.
 
 ## What this is
 
-JellySleeve is a **native macOS app** (SwiftUI + AppKit, no external
+JellyBeat is a **native macOS app** (SwiftUI + AppKit, no external
 dependencies) — a floating now-playing overlay for Jellyfin. See `README.md`
 for the feature set and `docs/BEST_PRACTICES.md` for the architecture.
 
@@ -15,10 +15,10 @@ Node — if you ever see those, the tool output is wrong (see below). Build and
 test from the command line:
 
 ```sh
-xcodebuild -project JellySleeve.xcodeproj -scheme JellySleeve \
+xcodebuild -project JellyBeat.xcodeproj -scheme JellyBeat \
            -configuration Debug -destination 'platform=macOS' build
 
-xcodebuild -project JellySleeve.xcodeproj -scheme JellySleeve \
+xcodebuild -project JellyBeat.xcodeproj -scheme JellyBeat \
            -destination 'platform=macOS' test
 ```
 

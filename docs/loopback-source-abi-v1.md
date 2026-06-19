@@ -1,14 +1,14 @@
 # Loopback PlaybackSource ABI — `loopback-source/1`
 
 Normative contract for a **third-party playback source**: any local process that
-implements this HTTP API on a loopback port becomes a source JellySleeve can
+implements this HTTP API on a loopback port becomes a source JellyBeat can
 show in the overlay and remote-control, picked automatically by the arbiter
 alongside Jellyfin and any other sources.
 
 This is the contract the bundled **YouTube bridge** already speaks, lifted
 vendor-neutral and frozen. The consumer side lives in
-[`LoopbackSourceClient`](../JellySleeve/Networking/LoopbackSourceClient.swift) /
-[`LoopbackSourceFeed`](../JellySleeve/State/LoopbackSourceFeed.swift); see
+[`LoopbackSourceClient`](../JellyBeat/Networking/LoopbackSourceClient.swift) /
+[`LoopbackSourceFeed`](../JellyBeat/State/LoopbackSourceFeed.swift); see
 [`architecture.md`](architecture.md) §3/§5/§10 for how sources are arbitrated.
 
 > Status: **phase 1**. Discovery, the wire format, and the manifest are stable.
@@ -171,11 +171,11 @@ and isn't guaranteed.
 
 ## 8. Discovery & manifest
 
-JellySleeve scans **once at launch** (no hot-reload in phase 1; adding a source
+JellyBeat scans **once at launch** (no hot-reload in phase 1; adding a source
 needs a relaunch):
 
 ```
-~/Library/Application Support/software.trypwood.jellysleeve/Sources/*.jellysource
+~/Library/Application Support/software.trypwood.jellybeat/Sources/*.jellysource
 ```
 
 Each `*.jellysource` file is JSON (the extension is plain JSON, named for
@@ -216,7 +216,7 @@ greppability) describing one source:
 
 1. Run a local process that implements §3–§6 on a `127.0.0.1` port.
 2. Drop a `*.jellysource` manifest (above) into the Sources directory.
-3. Relaunch JellySleeve. The source appears in the menu-bar **Source** picker and
+3. Relaunch JellyBeat. The source appears in the menu-bar **Source** picker and
    is arbitrated automatically.
 
 No app code change is required to add a *source*. (Adding a non-HTTP *transport*

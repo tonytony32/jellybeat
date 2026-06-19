@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<title>JellySleeve · WebSocket Timeline</title>
+<title>JellyBeat · WebSocket Timeline</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body {
@@ -17,7 +17,7 @@ canvas { display: block; }
 </style>
 </head>
 <body>
-<h1>JellySleeve · Flujo de mensajes WebSocket</h1>
+<h1>JellyBeat · Flujo de mensajes WebSocket</h1>
 <p class="sub">Secuencia real de conexión · Frecuencia y tamaño de mensajes en escala log₂</p>
 <div class="wrap"><canvas id="c"></canvas></div>
 
@@ -99,7 +99,7 @@ g.fillRect(0, 0, LW, LH);
 // ── Phase bands ─────────────────────────────────────────────────
 const phases = [
   { s:0,   e:8,   lab:'Sin clientes',          bg:'#0d1025' },
-  { s:8,   e:20,  lab:'Solo JellySleeve',       bg:'#0b180d' },
+  { s:8,   e:20,  lab:'Solo JellyBeat',       bg:'#0b180d' },
   { s:20,  e:35,  lab:'Web Player abierto',     bg:'#17120a' },
   { s:35,  e:60,  lab:'▶  Reproduciendo',       bg:'#170a0a' },
   { s:60,  e:120, lab:'WP cerrado · grace 60s', bg:'#0e0a22' },
@@ -120,9 +120,9 @@ hline(L3_BASE, '#1e2645');
 hline(TAXIS_Y, '#242e5c');
 
 // ── Lane labels ─────────────────────────────────────────────────
-// Lane 1: Server → JellySleeve
+// Lane 1: Server → JellyBeat
 txt('Servidor →',          ML-10, L1_BASE-46, '#50619a', 11, 'right');
-txt('JellySleeve',         ML-10, L1_BASE-33, '#50619a', 11, 'right');
+txt('JellyBeat',         ML-10, L1_BASE-33, '#50619a', 11, 'right');
 txt('Sessions · ×1.5 s',  ML-10, L1_BASE-18, '#2e3a68', 9.5, 'right');
 txt('(WebSocket push)',    ML-10, L1_BASE- 7, '#222840', 8.5, 'right');
 
@@ -131,8 +131,8 @@ txt('Web Player →',        ML-10, L2_BASE-38, '#9a7040', 11, 'right');
 txt('Servidor',            ML-10, L2_BASE-25, '#9a7040', 11, 'right');
 txt('HTTP POST /Sessions', ML-10, L2_BASE-12, '#503820', 9.5, 'right');
 
-// Lane 3: JellySleeve → Server
-txt('JellySleeve →',       ML-10, L3_BASE-36, '#368060', 11, 'right');
+// Lane 3: JellyBeat → Server
+txt('JellyBeat →',       ML-10, L3_BASE-36, '#368060', 11, 'right');
 txt('Servidor',            ML-10, L3_BASE-23, '#368060', 11, 'right');
 txt('WebSocket saliente',  ML-10, L3_BASE-11, '#1f4a38', 9.5, 'right');
 
@@ -141,11 +141,11 @@ g.fillStyle = '#152e22';
 g.fillRect(tx(8), WS_Y, tx(200) - tx(8), 4);
 txt('── WebSocket abierto ──────────────────────────────────────────────────────────────────────────────────', tx(8) + 6, WS_Y + 2, '#1e3f2c', 8, 'left', 'middle');
 
-// ── Sessions pushes (Server → JellySleeve) ──────────────────────
+// ── Sessions pushes (Server → JellyBeat) ──────────────────────
 //
 // CLAVE: el servidor Jellyfin mantiene la sesión en memoria ~30 min.
 // El tamaño del push NO baja cuando el browser cierra (t=60).
-// JellySleeve descarta la sesión de la UI a t=120, pero el tráfico
+// JellyBeat descarta la sesión de la UI a t=120, pero el tráfico
 // sigue igual hasta que el servidor la expire.
 //
 function pushSize(t) {
@@ -158,8 +158,8 @@ function pushSize(t) {
 function pushColor(t) {
   if (t < 20)  return '#1a2c72';   // dim — sin sesión
   if (t < 35)  return '#2a4ea8';   // medio — sesión idle
-  if (t < 60)  return '#4080ee';   // vivo — reproduciendo, JellySleeve muestra
-  if (t < 120) return '#2e62cc';   // stale (grace) — JellySleeve aún muestra
+  if (t < 60)  return '#4080ee';   // vivo — reproduciendo, JellyBeat muestra
+  if (t < 120) return '#2e62cc';   // stale (grace) — JellyBeat aún muestra
   return '#1e3e80';                // stale (dropped) — tráfico continúa, UI vacía
 }
 
@@ -183,7 +183,7 @@ szLabels.forEach(({ t, sz, col, lab }) => {
   });
 });
 
-// "JellySleeve descarta UI" callout at t=120
+// "JellyBeat descarta UI" callout at t=120
 {
   const x = tx(120);
   const h = logH(5000, MAX1);
@@ -219,7 +219,7 @@ txt('~285–450 B', tx(42), L2_BASE - logH(290, MAX2) - 15, '#705028', 9);
   txt('~10 s', (x1+x2)/2, y - 5, '#503018', 8.5);
 }
 
-// ── Outgoing WebSocket (JellySleeve → Server) ───────────────────
+// ── Outgoing WebSocket (JellyBeat → Server) ───────────────────
 // SessionsStart (one-time at connect)
 {
   const h = logH(48, MAX3);
@@ -254,7 +254,7 @@ for (let t = 38; t < 200; t += 30) {
 // ── Event markers ───────────────────────────────────────────────
 const events = [
   { t:0,   lab:['Servidor',   'arranca'],        col:'#4477dd' },
-  { t:8,   lab:['JellySleeve','arranca'],         col:'#33cc77' },
+  { t:8,   lab:['JellyBeat','arranca'],         col:'#33cc77' },
   { t:20,  lab:['Web Player', 'abre'],            col:'#cc8833' },
   { t:35,  lab:['▶  Play'],                       col:'#ee4444' },
   { t:60,  lab:['Web Player', 'cierra'],          col:'#cc44aa' },
@@ -309,7 +309,7 @@ const pushLegend = [
   { col:'#1a2c72', lab:'Sessions: sin sesión (~150 B)' },
   { col:'#2a4ea8', lab:'Sessions: idle (~1.1 KB)' },
   { col:'#4080ee', lab:'Sessions: reproduciendo (~5 KB)' },
-  { col:'#2e62cc', lab:'Sessions: stale · grace period (JellySleeve muestra)' },
+  { col:'#2e62cc', lab:'Sessions: stale · grace period (JellyBeat muestra)' },
   { col:'#1e3e80', lab:'Sessions: stale · descartada (tráfico = igual; servidor no ha expirado)' },
 ];
 g.save();
@@ -367,7 +367,7 @@ txt('↕ altura = log₂ bytes · líneas grises = 150 B / 1 KB / 5 KB',
   // Label
   txt('El servidor Jellyfin guarda la sesión ~30 min.',
       tx(160), y - 5, '#1e3e80', 9, 'center', 'bottom');
-  txt('JellySleeve la descartó pero el push de 5 KB sigue cada 1.5 s.',
+  txt('JellyBeat la descartó pero el push de 5 KB sigue cada 1.5 s.',
       tx(160), y + 5, '#162e60', 8.5, 'center', 'top');
 }
 

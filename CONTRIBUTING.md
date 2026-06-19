@@ -1,6 +1,6 @@
-# Contributing to JellySleeve
+# Contributing to JellyBeat
 
-Thanks for the interest. JellySleeve is a personal hobby project that
+Thanks for the interest. JellyBeat is a personal hobby project that
 happens to be open source; contributions are welcome, but please calibrate
 expectations:
 
@@ -16,9 +16,9 @@ expectations:
 ## Running the project
 
 ```sh
-git clone https://github.com/tonytony32/jellysleeve.git
-cd jellysleeve
-open JellySleeve.xcodeproj
+git clone https://github.com/tonytony32/jellybeat.git
+cd jellybeat
+open JellyBeat.xcodeproj
 ```
 
 Build target requires:
@@ -30,7 +30,7 @@ Build target requires:
 Run the tests:
 
 ```sh
-xcodebuild -project JellySleeve.xcodeproj -scheme JellySleeve \
+xcodebuild -project JellyBeat.xcodeproj -scheme JellyBeat \
            -destination 'platform=macOS' test
 ```
 
@@ -48,7 +48,7 @@ fair game for PRs.
   boundaries should be `Sendable` (or `nonisolated` for read-only value
   structs).
 - `os.Logger` for diagnostics — never `print`. The subsystem is
-  `software.trypwood.jellysleeve` and categories follow the layer
+  `software.trypwood.jellybeat` and categories follow the layer
   (`networking`, `state`, `ui`).
 - Anything sensitive (API key, server URL, session ids) goes into
   `Logger.notice/.error` arguments with `privacy: .private` /

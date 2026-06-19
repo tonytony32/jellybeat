@@ -1,4 +1,4 @@
-# JellySleeve — Plan de implementación v3
+# JellyBeat — Plan de implementación v3
 
 Documento de trabajo para Claude Code. Autocontenido. Léelo entero antes de empezar a crear archivos.
 
@@ -32,10 +32,10 @@ Las decisiones marcadas como **DECIDIDO** no se cuestionan, se ejecutan. Si encu
   - **API key: Keychain desde Fase 3**, no UserDefaults
 - **Networking:** `URLSession` con configuración custom (timeout 5s en polling, 15s en validación/control), `URLSessionDelegate` para trust opcional de self-signed certs
 - **Imágenes:** descarga manual con caching en disco + memoria. Clave de cache = `itemId + imageTag` (ver Fase 2)
-- **Logging:** `os.Logger` con subsistema `software.trypwood.jellysleeve` y categorías por capa (`networking`, `state`, `ui`). API key marcada `.private` en formatters
+- **Logging:** `os.Logger` con subsistema `software.trypwood.jellybeat` y categorías por capa (`networking`, `state`, `ui`). API key marcada `.private` en formatters
 - **Dependencias externas SPM:** ninguna por defecto. Si la necesitas, justifícala en el PR con motivo concreto
 
-**Nombre del proyecto:** `JellySleeve`. Bundle ID: `software.trypwood.jellysleeve`.
+**Nombre del proyecto:** `JellyBeat`. Bundle ID: `software.trypwood.jellybeat`.
 
 ---
 
@@ -72,9 +72,9 @@ Ventanas:
 - **MenuBarExtra** con "Open Overlay", "Settings...", "Quit".
 
 ```
-JellySleeve/
+JellyBeat/
 ├── App/
-│   ├── JellySleeveApp.swift          # @main, Settings scene, MenuBarExtra
+│   ├── JellyBeatApp.swift          # @main, Settings scene, MenuBarExtra
 │   └── AppDelegate.swift             # NSWindow setup, NSWorkspace observers
 ├── Networking/
 │   ├── JellyfinClient.swift          # actor o struct, métodos REST
@@ -129,7 +129,7 @@ JellySleeve/
 
 ## 3bis. Sistema de themes / layouts (decisión estructural)
 
-Sleeve trata los "themes" como layout presets completos, no como cambios cosméticos. JellySleeve hace lo mismo. Esta sección define el contrato.
+Sleeve trata los "themes" como layout presets completos, no como cambios cosméticos. JellyBeat hace lo mismo. Esta sección define el contrato.
 
 ### 3bis.1 Conceptos
 
@@ -217,7 +217,7 @@ En Fase 7 se introduce `ThemeOverride`, una struct serializable que guarda solo 
 finalTheme = builtIn.applying(override)
 ```
 
-Persistencia: `~/Library/Application Support/JellySleeve/themes/overrides/{themeId}.json`. Export a un archivo `.jellysleevetheme` (JSON con metadata + override) que puede importarse por drag-and-drop sobre la app.
+Persistencia: `~/Library/Application Support/JellyBeat/themes/overrides/{themeId}.json`. Export a un archivo `.jellybeattheme` (JSON con metadata + override) que puede importarse por drag-and-drop sobre la app.
 
 **No MVP. Solo Fase 7 si tras uso real lo echas de menos.**
 
@@ -372,9 +372,9 @@ window.center()
 window.makeKeyAndOrderFront(nil)
 ```
 
-`OverlayView` placeholder: rectángulo redondeado 16pt con `NSVisualEffectView` material `.hudWindow` (envuelto en `NSViewRepresentable` `GlassBackground`), texto "JellySleeve" centrado.
+`OverlayView` placeholder: rectángulo redondeado 16pt con `NSVisualEffectView` material `.hudWindow` (envuelto en `NSViewRepresentable` `GlassBackground`), texto "JellyBeat" centrado.
 
-`@main JellySleeveApp` usa `NSApplicationDelegateAdaptor` y declara la escena `Settings { SettingsView() }` (vacía por ahora) más un `MenuBarExtra("JellySleeve", systemImage: "music.note")` con menú "Open Overlay", "Settings...", "Quit".
+`@main JellyBeatApp` usa `NSApplicationDelegateAdaptor` y declara la escena `Settings { SettingsView() }` (vacía por ahora) más un `MenuBarExtra("JellyBeat", systemImage: "music.note")` con menú "Open Overlay", "Settings...", "Quit".
 
 **Criterio:**
 1. Al ejecutar, aparece cuadrado flotante translúcido sin chrome
@@ -445,7 +445,7 @@ Test manual al final de la fase: botón temporal en `OverlayView` que llama a `v
 - `func save(apiKey: String) throws`
 - `func load() -> String?`
 - `func delete() throws`
-Usar Security framework, account `software.trypwood.jellysleeve.apikey`.
+Usar Security framework, account `software.trypwood.jellybeat.apikey`.
 
 Migration: en primer launch de v2, si hay API key en UserDefaults (de un v1 anterior), moverla a Keychain y borrar de UserDefaults. En esta fase fresh install, no aplica.
 
@@ -458,7 +458,7 @@ Migration: en primer launch de v2, si hay API key en UserDefaults (de un v1 ante
 
 **Criterio:**
 1. Configurar el server real desde la UI, persiste tras reiniciar
-2. API key NO está en `~/Library/Preferences/software.trypwood.jellysleeve.plist` (verificar con `defaults read`)
+2. API key NO está en `~/Library/Preferences/software.trypwood.jellybeat.plist` (verificar con `defaults read`)
 3. Test connection funciona
 4. Borrar la API key del Keychain manualmente con `security delete-generic-password ...` deja la app en estado limpio
 
@@ -538,7 +538,7 @@ Implementa `ThemeRegistry` `@MainActor @Observable` con un único theme inicial:
 
 `ArtworkCache` actor:
 - Memoria: NSCache<NSString, NSImage> con countLimit ~50
-- Disco: `~/Library/Caches/software.trypwood.jellysleeve/artwork/{itemId}_{tag}.jpg`
+- Disco: `~/Library/Caches/software.trypwood.jellybeat/artwork/{itemId}_{tag}.jpg`
 - API: `func image(for itemId: String, tag: String?) async -> NSImage?`. Lee memoria → disco → red.
 
 **Criterio:**
@@ -639,8 +639,8 @@ Construir solo si tras una semana de uso lo echas en falta. No por adelantado.
 
 - **WebSocket push:** sustituir polling por `/socket` event stream. Reconexión automática, heartbeat cada 30s, fallback a polling si conexión socket falla 3 veces seguidas.
 - **Atajos globales:** `NSEvent.addGlobalMonitorForEvents` para play/pause/next/prev/like. Onboarding del permiso Accessibility con UI dedicada.
-- **Modificación de themes (overrides):** introducir `ThemeOverride` serializable. UI con sliders y selectores en la Appearance tab para tocar parámetros del theme actual (tamaño artwork, opacidad líneas, fuente, etc.). Indicador "Modified" en la celda del theme. Botón "Reset to default" que borra el override. Persistencia en `~/Library/Application Support/JellySleeve/themes/overrides/{themeId}.json`.
-- **Export/import de themes:** formato `.jellysleevetheme` (JSON con metadata + override). Export con NSSavePanel. Import por drag-and-drop en la app o doble click si registramos UTI en Info.plist.
+- **Modificación de themes (overrides):** introducir `ThemeOverride` serializable. UI con sliders y selectores en la Appearance tab para tocar parámetros del theme actual (tamaño artwork, opacidad líneas, fuente, etc.). Indicador "Modified" en la celda del theme. Botón "Reset to default" que borra el override. Persistencia en `~/Library/Application Support/JellyBeat/themes/overrides/{themeId}.json`.
+- **Export/import de themes:** formato `.jellybeattheme` (JSON con metadata + override). Export con NSSavePanel. Import por drag-and-drop en la app o doble click si registramos UTI en Info.plist.
 - **HUD de feedback:** ventana auxiliar tipo Sleeve para volume/track changes.
 - **Updater Sparkle:** si vas a compartir el binario con alguien más.
 - **Crash reporting:** opcional, solo si open source.
@@ -654,7 +654,7 @@ Construir solo si tras una semana de uso lo echas en falta. No por adelantado.
 - No soporte para más servers (Plex, Spotify, Apple Music). Solo Jellyfin.
 - No App Store, no sandbox estricto.
 - No iCloud sync.
-- No formato de archivo propio para themes (`.jellysleevetheme`) en Fases 0-6. JSON simple, sin UTI registrado. Esto llega en Fase 7 si entra.
+- No formato de archivo propio para themes (`.jellybeattheme`) en Fases 0-6. JSON simple, sin UTI registrado. Esto llega en Fase 7 si entra.
 - No modificación de themes (overrides de parámetros) en MVP. Built-in themes son inmutables en Nivel 1.
 - No creación de themes desde cero en MVP ni en Nivel 2. Si llega, Fase 7+.
 - No tests UI (XCUITest). Solo unit tests del cliente REST y modelos.
@@ -720,13 +720,13 @@ No los hardcodees. Pídelos via Settings UI.
 
 ## 12. Preparación para open source
 
-JellySleeve se va a publicar como open source tras el MVP Nivel 1, no antes. Pero hay cosas que conviene hacer bien desde el día uno para que abrirlo después sea trivial. Esta sección lista lo que debe estar listo en cada fase.
+JellyBeat se va a publicar como open source tras el MVP Nivel 1, no antes. Pero hay cosas que conviene hacer bien desde el día uno para que abrirlo después sea trivial. Esta sección lista lo que debe estar listo en cada fase.
 
 ### 12.1 Decisión pendiente antes de Fase 0
 
-**Bundle ID y namespace.** El plan asume `software.trypwood.jellysleeve`. Antes de empezar Fase 0, confirmar con el usuario si quiere:
-- A) Mantener `software.trypwood.jellysleeve` (asociación con su empresa trypwood)
-- B) Cambiar a un namespace personal o dedicado (ej. `dev.antonio.jellysleeve` o `software.jellysleeve.app`)
+**Bundle ID y namespace.** El plan asume `software.trypwood.jellybeat`. Antes de empezar Fase 0, confirmar con el usuario si quiere:
+- A) Mantener `software.trypwood.jellybeat` (asociación con su empresa trypwood)
+- B) Cambiar a un namespace personal o dedicado (ej. `dev.antonio.jellybeat` o `software.jellybeat.app`)
 
 Esta decisión afecta a: Keychain account name, paths en `~/Library/Application Support/...` y `~/Library/Caches/...`, identificadores de logs, futuro repo URL. Cambio caro después.
 
@@ -774,7 +774,7 @@ Cuando se cumpla el criterio de "terminado Nivel 1" (sección 10):
 
 1. **Code signing:** firmar el binario con Developer ID del usuario. Si no tiene Developer ID Apple ($99/año), distribución sin firmar requiere instrucciones de "abrir desde clic derecho" en el README, viable pero feo.
 2. **Notarization:** subir a Apple via `xcrun notarytool submit` para que el primer launch no muestre el aviso de "app no notarizada". Tarda 5-30 minutos.
-3. **Staple:** `xcrun stapler staple JellySleeve.app` para que la notarización quede embebida y funcione offline.
+3. **Staple:** `xcrun stapler staple JellyBeat.app` para que la notarización quede embebida y funcione offline.
 4. **Empaquetar como DMG firmado** con `create-dmg` o equivalente. Incluir un fondo simple con el icono y una flecha al Applications folder.
 5. **Tag de release:** `v0.1.0` en GitHub con el DMG adjunto y release notes breves.
 6. **Hacer público el repo** (`Settings > Change visibility > Public`).

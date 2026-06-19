@@ -1,6 +1,6 @@
 # Plan: YouTube-bridge source + multi-source arbiter
 
-Goal: let JellySleeve show and control **whatever is playing right now** — Jellyfin **or**
+Goal: let JellyBeat show and control **whatever is playing right now** — Jellyfin **or**
 YouTube / YouTube Music — picking the source **automatically**, with a manual override in the
 macOS menu bar.
 
@@ -24,7 +24,7 @@ first. Code against that normalized contract, **not** against YouTube-specific s
 
 ## Architecture: keep Jellyfin's transport intact, add a sibling feed + an arbiter
 
-JellySleeve's Jellyfin transport is sophisticated (WebSocket-preferred + polling fallback +
+JellyBeat's Jellyfin transport is sophisticated (WebSocket-preferred + polling fallback +
 reconnect + sleep/wake, in `PlaybackConnectionCoordinator`). **Do not** force the bridge through
 it. Instead:
 
@@ -94,11 +94,11 @@ so it can't clobber the shared state.
     called while Jellyfin is active.
 - **`App/AppDelegate.swift`** — create the `SourceArbiter` (instead of activating the coordinator
   directly); hand it the coordinator + a new `YouTubeBridgeFeed`.
-- **`App/JellySleeveApp.swift`** — add the "Source" section to the `MenuBarExtra` (~line 27):
+- **`App/JellyBeatApp.swift`** — add the "Source" section to the `MenuBarExtra` (~line 27):
   three options bound to `settings.sourceSelection`, ✓ on `arbiter.activeKind`.
 - **`State/SettingsStore.swift`** — add `sourceSelection` (`auto` | `jellyfin` | `youtube`),
   persisted in `UserDefaults` (mirror the `appPresence`/`@AppStorage` pattern at
-  `JellySleeveApp.swift:10`).
+  `JellyBeatApp.swift:10`).
 - **`UI/Overlay/Components/ArtworkView.swift`** — if `artworkURL != nil`, load it directly
   (`URLSession`/`AsyncImage`-style) instead of `cache.data(forItemId:tag:)` (~line 79).
 - **`UI/Overlay/Components/ControlsView.swift`** + queue UI — hide the favorite heart when
@@ -124,7 +124,7 @@ Re-evaluate on: each YT poll, Jellyfin `currentTrack` change (Observation), and 
 `sourceSelection` change. On a *flip*, gate the feeds (pause loser, resume winner) and swap the
 command sink + capabilities. Debounce flips slightly to avoid flapping when both briefly active.
 
-## Mapping bridge → JellySleeve
+## Mapping bridge → JellyBeat
 
 | Bridge (`/v1/now-playing`) | TrackSnapshot / PlayerStore |
 |---|---|
@@ -150,7 +150,7 @@ arbiter and feed are `@MainActor`. No Combine — Observation drives the UI.
 - **State ownership on flip** — the biggest risk. Ensure the losing feed is fully paused before
   the winner writes, so they don't interleave. Add unit tests for the arbiter's decision +
   flip-gating (mock both feeds).
-- **Don't regress Jellyfin** — run the existing `JellySleeveTests` suite green at every step;
+- **Don't regress Jellyfin** — run the existing `JellyBeatTests` suite green at every step;
   the Jellyfin transport path must behave identically when YouTube is idle.
 - **Loopback HTTP from a sandboxed app** — verify the entitlement/ATS; treat connection-refused
   as idle (it's the normal "Safari closed" state, not an error).

@@ -1,4 +1,4 @@
-# JellySleeve docs
+# JellyBeat docs
 
 Map of the documentation. Start here.
 

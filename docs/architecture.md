@@ -1,6 +1,6 @@
-# JellySleeve — Architecture
+# JellyBeat — Architecture
 
-Reference for how JellySleeve is put together, with emphasis on the
+Reference for how JellyBeat is put together, with emphasis on the
 **multi-source playback** system (Jellyfin + YouTube bridge, arbitrated). For
 the *why* behind the conventions see [`BEST_PRACTICES.md`](BEST_PRACTICES.md);
 for the original feature plan see
@@ -19,7 +19,7 @@ One-way dependency flow: **Networking → State → UI**. A lower layer never kn
 a higher one. App-level coordinators wire them together.
 
 ```
-App/         AppDelegate, JellySleeveApp, SourceArbiter, SourceRegistry,
+App/         AppDelegate, JellyBeatApp, SourceArbiter, SourceRegistry,
              PlaybackConnectionCoordinator, OverlayWindowController, …
 State/       PlayerStore (single source of truth), SettingsStore,
              PlaybackPoller, LoopbackSourceFeed, ArtworkCache
@@ -74,7 +74,7 @@ derives the arbiter's id ordering and home/tie priorities:
 - **Built-in:** YouTube at `http://127.0.0.1:8976` (the `yt-safari-bridge` Safari
   Web Extension), now expressed as a descriptor rather than a special case.
 - **Third-party:** any `*.jellysource` manifest in
-  `~/Library/Application Support/software.trypwood.jellysleeve/Sources/` (scanned
+  `~/Library/Application Support/software.trypwood.jellybeat/Sources/` (scanned
   once at launch — see §10).
 
 Contract essentials (frozen from YouTube's behavior):
@@ -260,7 +260,7 @@ point of the ABI ([`loopback-source-abi-v1.md`](loopback-source-abi-v1.md)):
    `127.0.0.1` port.
 2. Drop a `*.jellysource` manifest (`id`, `displayName`, `port`, optional
    `pathPrefix`/`homeRank`/`tieRank`) into
-   `~/Library/Application Support/software.trypwood.jellysleeve/Sources/`.
+   `~/Library/Application Support/software.trypwood.jellybeat/Sources/`.
 3. Relaunch. `SourceRegistry` discovers it and builds its `LoopbackSourceClient`
    + `LoopbackSourceFeed`; the arbiter weighs it (`decide` and `ActivationRecency`
    generalize over the registry's id set, which becomes the observe order); and

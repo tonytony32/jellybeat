@@ -1,4 +1,4 @@
-# JellySleeve
+# JellyBeat
 
 A floating now-playing overlay for macOS. Its home source is a remote
 Jellyfin server — mirrored over the REST API and `/socket` push — and it
@@ -8,7 +8,7 @@ independently for Jellyfin — no AppleScript, no Apple Music dependency.
 
 [sleeve]: https://replay.software/sleeve
 
-> **Status — v0.2.1-beta.** Multi-source milestone, refined: a formal
+> **Status — v0.3.0-beta.** Multi-source milestone, refined: a formal
 > third-party loopback plugin ABI, a Source-first menu bar with faithful theme
 > previews, and a round of overlay/reliability fixes. Tagged source betas only —
 > not packaged for distribution: no Developer ID signing, no notarised DMG.
@@ -49,7 +49,7 @@ independently for Jellyfin — no AppleScript, no Apple Music dependency.
 
 - macOS 26.0 Tahoe or later, Apple Silicon
 - A reachable Jellyfin server (10.7+ recommended for the WebSocket
-  protocol JellySleeve uses)
+  protocol JellyBeat uses)
 - An API key from **Jellyfin Dashboard → Advanced → API Keys**
 - Your user ID from **Dashboard → Users → your user**
 
@@ -59,15 +59,15 @@ The project is a vanilla SwiftUI / AppKit hybrid with no external
 dependencies. Open in Xcode 26.5 or later:
 
 ```sh
-git clone https://github.com/tonytony32/jellysleeve.git
-cd jellysleeve
-open JellySleeve.xcodeproj
+git clone https://github.com/tonytony32/jellybeat.git
+cd jellybeat
+open JellyBeat.xcodeproj
 ```
 
 Or build from the command line:
 
 ```sh
-xcodebuild -project JellySleeve.xcodeproj -scheme JellySleeve \
+xcodebuild -project JellyBeat.xcodeproj -scheme JellyBeat \
            -configuration Release build
 ```
 
@@ -96,7 +96,7 @@ version means you're good.
 
 ## Sources
 
-JellySleeve can mirror and remote-control more than one backend, and shows
+JellyBeat can mirror and remote-control more than one backend, and shows
 whichever one is actually playing:
 
 - **Jellyfin** — the privileged built-in (WebSocket + REST) and the "home"
@@ -105,7 +105,7 @@ whichever one is actually playing:
   Extension as a local loopback source on `127.0.0.1`.
 - **Third-party plugins** — any local process that speaks the loopback ABI and
   drops a `*.jellysource` manifest into
-  `~/Library/Application Support/software.trypwood.jellysleeve/Sources/`. No app
+  `~/Library/Application Support/software.trypwood.jellybeat/Sources/`. No app
   code change is required.
 
 Selection is automatic — the most recently started source wins — with a manual
@@ -116,14 +116,14 @@ are documented in [`docs/architecture.md`](docs/architecture.md) and
 ## Layout
 
 ```
-JellySleeve.xcodeproj/        # Xcode project + shared scheme
-JellySleeve/                  # Sources
+JellyBeat.xcodeproj/        # Xcode project + shared scheme
+JellyBeat/                  # Sources
   App/                        # AppDelegate, coordinators, SourceArbiter, SourceRegistry, monitors
   Networking/                 # JellyfinClient + socket, LoopbackSourceClient, SourceManifest, models
   State/                      # PlayerStore, SettingsStore, poller, source feeds, caches, Keychain
   UI/                         # OverlayView, themes, Settings tabs, components
   Assets.xcassets             # AppIcon, AccentColor, JellyfinLogo
-JellySleeveTests/             # Swift Testing target with Jellyfin response fixtures
+JellyBeatTests/             # Swift Testing target with Jellyfin response fixtures
 docs/                         # see docs/README.md for the full map
   architecture.md             # current architecture (multi-source playback)
   loopback-source-abi-v1.md   # the third-party source ABI contract
@@ -170,7 +170,7 @@ layer so the store never depends on a view type.
 ## Tests
 
 ```sh
-xcodebuild -project JellySleeve.xcodeproj -scheme JellySleeve \
+xcodebuild -project JellyBeat.xcodeproj -scheme JellyBeat \
            -destination 'platform=macOS' test
 ```
 
@@ -184,7 +184,7 @@ aren't directly under test.
 
 ## Support and maintenance
 
-JellySleeve is a personal hobby project. Use it as you would any other
+JellyBeat is a personal hobby project. Use it as you would any other
 piece of AGPL-3.0-licensed software: **best effort, no warranty, no SLA on
 issue triage or PR review.**
 
