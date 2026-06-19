@@ -29,6 +29,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var phoneCallMonitor: PhoneCallMonitor?
 
     override init() {
+        // Migrate any pre-rename (JellySleeve) login/settings into the new
+        // bundle-id identity BEFORE the stores below read UserDefaults/Keychain.
+        // If a store ran first it would see the empty new domain and persist
+        // logged-out/default state. Idempotent; see `IdentityMigrator`.
+        IdentityMigrator.runIfNeeded()
         let settings = SettingsStore()
         let player = PlayerStore()
         let themes = ThemeRegistry()
