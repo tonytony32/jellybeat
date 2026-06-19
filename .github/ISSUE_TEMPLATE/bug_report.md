@@ -23,7 +23,7 @@ assignees: ''
 ## Environment
 
 - **macOS:** <!-- e.g. 26.0 Tahoe, Apple Silicon -->
-- **JellySleeve version:** <!-- v0.1.0-beta or commit hash -->
+- **JellyBeat version:** <!-- v0.1.0-beta or commit hash -->
 - **Jellyfin server version:** <!-- e.g. 10.10.3 -->
 - **Active theme:** <!-- Standard / Classic / Minim / Aero -->
 - **Connection:** <!-- WebSocket / Polling fallback (Settings → Diagnostics shows this) -->

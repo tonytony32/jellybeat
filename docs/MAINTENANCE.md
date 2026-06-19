@@ -32,6 +32,12 @@ Internal notes — not promises to the community.
 - Use semver. Pre-releases get a suffix (`-beta`, `-rc1`).
 - Update the corresponding `Marketing version` in the Xcode project's
   build settings if (and only if) you cut a tagged release.
+- **v0.3.0 renamed the app** (JellySleeve → JellyBeat) and its bundle id
+  (`software.trypwood.jellybeat`). Because the bundle id changed, the built
+  `JellyBeat.app` is a *distinct* app from the old `JellySleeve.app` — a
+  drag-install won't overwrite it. On upgrade, remove the old
+  `/Applications/JellySleeve.app`. There is no data migration — settings/login do
+  not carry over (acceptable pre-release; reconfigure on first launch).
 
 ## Support
 

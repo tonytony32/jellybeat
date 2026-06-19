@@ -5,7 +5,7 @@ name: CI
 # branch; the format job is informational.
 #
 # NOTE — why we compile instead of run the test suite:
-# JellySleeve's deployment target is macOS 26.0, but GitHub's hosted macOS
+# JellyBeat's deployment target is macOS 26.0, but GitHub's hosted macOS
 # runners are still on macOS 15.x. You can BUILD for a 26.0 target on a 15.x
 # host (the 26.x SDK ships with Xcode 26 on the runner), but you cannot RUN a
 # 26.0-targeted test bundle there ("My Mac's macOS 15.x doesn't match the
@@ -35,7 +35,7 @@ jobs:
       # want supply-chain-hardened, immutable action references.
       - uses: actions/checkout@v4
 
-      # JellySleeve uses Swift 6 strict concurrency and the latest SDK, so
+      # JellyBeat uses Swift 6 strict concurrency and the latest SDK, so
       # build with the newest stable Xcode the runner offers rather than its
       # (possibly older) default selection.
       - name: Select latest stable Xcode
@@ -55,8 +55,8 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild \
-            -project JellySleeve.xcodeproj \
-            -scheme JellySleeve \
+            -project JellyBeat.xcodeproj \
+            -scheme JellyBeat \
             -configuration Debug \
             -destination 'platform=macOS' \
             build-for-testing
@@ -67,8 +67,8 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild \
-            -project JellySleeve.xcodeproj \
-            -scheme JellySleeve \
+            -project JellyBeat.xcodeproj \
+            -scheme JellyBeat \
             -configuration Release \
             -destination 'platform=macOS' \
             build
@@ -91,12 +91,12 @@ jobs:
       # auto-fixable violations plus ~50 over-length code lines — i.e. on
       # existing style, not on the change under review. The `|| true` keeps this
       # check green while still surfacing suggestions in the log. To make it a
-      # real gate: run `swift-format format -i -r JellySleeve JellySleeveTests`,
+      # real gate: run `swift-format format -i -r JellyBeat JellyBeatTests`,
       # hand-wrap the long code lines, then drop the `|| true`.
       - name: swift-format lint (advisory)
         run: |
           echo "::group::swift-format suggestions (advisory — does not fail CI)"
           xcrun swift-format lint --strict --recursive \
             --configuration .swift-format \
-            JellySleeve JellySleeveTests || true
+            JellyBeat JellyBeatTests || true
           echo "::endgroup::"

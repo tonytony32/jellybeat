@@ -1,4 +1,4 @@
-# JellySleeve — Recomendaciones y best practices
+# JellyBeat — Recomendaciones y best practices
 
 Guía para reconstruir el proyecto desde cero sin repetir los errores que ya
 costó corregir. Complementa a [`PLAN.md`](plans/PLAN.md) (el *qué* y el orden de
@@ -238,7 +238,7 @@ código porque no son obvias:
 
 ## 11. Logging
 
-- `os.Logger` con un subsistema (`software.trypwood.jellysleeve`) y **una
+- `os.Logger` con un subsistema (`software.trypwood.jellybeat`) y **una
   categoría por capa**.
 - **Marca los secretos como `.private`** en los formatters; el resto `.public`
   para que sea útil en Console.app.
