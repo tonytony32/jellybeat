@@ -1,4 +1,5 @@
 # JellyBeat
+<img width="1424" height="810" alt=" 2026-06-19 a las 12 24 53" src="https://github.com/user-attachments/assets/4fd3d46b-bc88-421c-a0b5-7fa06ed3a045" />
 
 A floating now-playing overlay for macOS. Its home source is a remote
 Jellyfin server — mirrored over the REST API and `/socket` push — and it
