@@ -7,20 +7,10 @@ suffix (`-beta`, `-rc`).
 
 ### Renamed: JellySleeve → JellyBeat
 
-The app is now **JellyBeat**. The rename also changed its bundle identifier
-(`software.trypwood.jellysleeve` → `software.trypwood.jellybeat`).
+The app is now **JellyBeat**. The rename also changed its bundle identifier to
+`software.trypwood.jellybeat`, so macOS treats it as a brand-new app.
 
-- **Your login and settings carry over automatically.** On first launch JellyBeat
-  migrates your Jellyfin server URL, API key (whether it lived in UserDefaults or
-  the Keychain), selected source, theme, window placement, and install identity
-  from the previous version. Nothing from the old install is deleted, so you can
-  still roll back to JellySleeve.
-- **Existing source bridges keep working.** Discovery now scans both the new
-  `~/Library/Application Support/software.trypwood.jellybeat/Sources` directory
-  and the previous `…/software.trypwood.jellysleeve/Sources` one, so a bridge
-  installed against the old build is still found (the current path wins any
-  collision). New bridges should target the `jellybeat` path. The loopback-source
-  ABI is unchanged (still `loopback-source/1`).
-- **Delete the old app after upgrading.** Because the bundle identifier changed,
-  `JellyBeat.app` is a *distinct* app from `JellySleeve.app` and the two coexist
-  in `/Applications`. Once JellyBeat works, remove the old `JellySleeve.app`.
+- **Reconfigure after upgrading.** Settings and login do **not** carry over from
+  the old build — open Settings and re-enter your Jellyfin server URL and API key.
+- **Delete the old app.** `JellyBeat.app` is a distinct app from `JellySleeve.app`
+  and the two coexist in `/Applications`; remove the old `JellySleeve.app`.

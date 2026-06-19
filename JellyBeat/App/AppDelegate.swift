@@ -30,19 +30,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     override init() {
         // The hosted unit-test runner launches this app as its test host, so
-        // `init` runs once per `xcodebuild test`. Keep every launch-time side
-        // effect OFF the user's real domains: skip the identity migration and
-        // back the stores with a throwaway UserDefaults suite + in-memory
-        // Keychain. `applicationDidFinishLaunching` likewise early-returns.
+        // `init` runs once per `xcodebuild test`. Keep launch-time side effects
+        // OFF the user's real domains: under tests, back the stores with a
+        // throwaway UserDefaults suite + in-memory Keychain.
+        // `applicationDidFinishLaunching` likewise early-returns.
         let underTests = Self.isRunningUnitTests
 
-        // Migrate any pre-rename (JellySleeve) login/settings into the new
-        // bundle-id identity BEFORE the stores below read UserDefaults/Keychain.
-        // If a store ran first it would see the empty new domain and persist
-        // logged-out/default state. Idempotent; see `IdentityMigrator`.
-        if !underTests {
-            IdentityMigrator.runIfNeeded()
-        }
         let defaults: UserDefaults = underTests
             ? (UserDefaults(suiteName: Self.testHostSuiteName) ?? .standard)
             : .standard

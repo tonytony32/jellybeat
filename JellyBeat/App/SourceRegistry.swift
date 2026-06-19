@@ -89,11 +89,9 @@ final class SourceRegistry {
         }
     }
 
-    /// Build a registry by scanning the on-disk Sources directories (the current
-    /// location plus the pre-rename legacy one, so bridges installed against the
-    /// old JellySleeve build are still discovered).
+    /// Build a registry by scanning the on-disk Sources directory.
     static func loadingFromDisk() -> SourceRegistry {
-        SourceRegistry(manifests: SourceManifestLoader.load(directories: SourceManifestLoader.allDirectories))
+        SourceRegistry(manifests: SourceManifestLoader.load(directory: SourceManifestLoader.defaultDirectory))
     }
 
     // MARK: - Identity & ordering

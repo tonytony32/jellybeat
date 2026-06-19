@@ -178,16 +178,6 @@ needs a relaunch):
 ~/Library/Application Support/software.trypwood.jellybeat/Sources/*.jellysource
 ```
 
-> **Legacy path (post-rename back-compat).** JellyBeat shipped as *JellySleeve*
-> through v0.2.x. So bridges installed against the old build keep working,
-> discovery also scans the pre-rename location
-> `~/Library/Application Support/software.trypwood.jellysleeve/Sources/` after
-> the path above. Both directories share one de-duplication pass and the current
-> path **wins** any `id`/`port` collision, so a source migrates by simply
-> dropping its manifest into the new directory. This is purely an app-side
-> discovery detail — the manifest/wire contract is unchanged, so the **ABI major
-> stays `1`**. New bridges should target the `jellybeat` path.
-
 Each `*.jellysource` file is JSON (the extension is plain JSON, named for
 greppability) describing one source:
 
