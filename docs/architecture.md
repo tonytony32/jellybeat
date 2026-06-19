@@ -209,6 +209,11 @@ feeds keep running** and the arbiter gates *writes*:
 **Flip+write atomicity:** `ingest` calls `onJellyfinUpdate()` *before* its gate
 check, so the very poll that detects Jellyfin starting both flips the arbiter
 (`jellyfinIsActiveSource = true`) and writes the snapshot in one main-actor pass.
+The mirror direction is atomic too: a Jellyfin tick that *flips onto* a loopback
+source (e.g. Jellyfin stops and a parked YouTube is revealed) publishes that
+source's snapshot on the same pass (`publish = didFlip`), so the overlay cover,
+the menu's `activeKind`, and the command sink all land on YouTube together —
+rather than the cover lagging by one poll.
 
 ## 6. `PlayerStore` — single source of truth
 

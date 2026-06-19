@@ -166,8 +166,13 @@ final class SourceArbiter {
 
         // Publish the winning loopback source's snapshot only when its own poll
         // (or a selection change / initial pass) is the fresh trigger — Jellyfin
-        // writes its own state through `ingest`, and another source's tick
-        // shouldn't republish this one.
+        // writes its own state through `ingest`, and another source's *steady-state*
+        // tick shouldn't republish this one. The exception is a Jellyfin tick that
+        // *flips us onto* a loopback source (e.g. Jellyfin stops while a parked
+        // YouTube is revealed): publish its already-in-hand snapshot on that same
+        // pass so the overlay repaints instantly, mirroring the Jellyfin arm's
+        // `coordinator.forceRefresh()`. Otherwise the cover would lag the menu's
+        // `activeKind` + the command sink by up to one poll (~1 s).
         //
         // Always publish as `.connected`, never `.idle`: `.idle` is Jellyfin's
         // "not configured" state and the overlay renders it as the "Configure your
@@ -179,7 +184,7 @@ final class SourceArbiter {
             switch trigger {
             case .loopback(let id): publish = (id == kind)
             case .selection, .initial: publish = true
-            case .jellyfin: publish = false
+            case .jellyfin: publish = didFlip   // flip TO this loopback source → repaint now
             }
             if publish {
                 let ext = feed.latest ?? .idle
