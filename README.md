@@ -17,7 +17,7 @@ independently for Jellyfin — no AppleScript, no Apple Music dependency.
 ## What it does
 
 - **Mirrors more than one source.** Jellyfin is the home source; YouTube /
-  YouTube Music (via the `yt-safari-bridge` Safari extension) and any
+  YouTube Music (via the [yt-safari-bridge](https://github.com/tonytony32/yt-safari-bridge.git) Safari extension) and any
   third-party loopback plugin are picked up automatically. The most recently
   started source drives the overlay, with a manual override in the menu-bar
   **Source** picker. (See [Sources](#sources).)
@@ -102,7 +102,7 @@ whichever one is actually playing:
 
 - **Jellyfin** — the privileged built-in (WebSocket + REST) and the "home"
   source the overlay falls back to when nothing else is playing.
-- **YouTube / YouTube Music** — surfaced by the `yt-safari-bridge` Safari Web
+- **YouTube / YouTube Music** — surfaced by the [yt-safari-bridge](https://github.com/tonytony32/yt-safari-bridge.git) Safari Web
   Extension as a local loopback source on `127.0.0.1`.
 - **Third-party plugins** — any local process that speaks the loopback ABI and
   drops a `*.jellysource` manifest into
