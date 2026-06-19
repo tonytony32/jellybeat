@@ -2,6 +2,21 @@ import Foundation
 import os
 import Security
 
+/// The pre-rename bundle identifier. JellyBeat shipped as **JellySleeve** through
+/// v0.2.x; the v0.3.0 rename changed the bundle id to `software.trypwood.jellybeat`.
+/// This is the SINGLE source of truth for the OLD identifier — used to read
+/// pre-rename UserDefaults, the legacy Keychain item, and the legacy Sources
+/// directory (`SourceManifestLoader.legacyDirectory`). **Do NOT change this value
+/// to `jellybeat`**: it is the *address of the old data*, not a name to rebrand —
+/// flipping it makes the migrator read the new (empty) identity and every
+/// upgrading user appears logged out (and CI would not catch it, since the tests
+/// inject their own suites). `nonisolated` immutable `String` so it's readable
+/// from both `@MainActor` (`IdentityMigrator`) and `nonisolated`
+/// (`SourceManifestLoader`) contexts under Swift 6.
+nonisolated enum LegacyIdentity {
+    static let bundleID = "software.trypwood.jellysleeve"
+}
+
 /// One-time migration from the pre-rename identity to the current one.
 ///
 /// JellyBeat was called **JellySleeve** through v0.2.x. The v0.3.0 rename
@@ -26,13 +41,11 @@ enum IdentityMigrator {
 
     // MARK: Legacy identity (pre-rename)
     //
-    // These literals are the OLD `software.trypwood.jellysleeve` identifier,
-    // deliberately retained after the JellySleeve → JellyBeat rename. This (and
-    // `SourceManifest.legacyDirectory`) are the only places that must keep the
-    // old name — do NOT "fix" them to jellybeat or the migration reads nothing.
-    private static let legacyDomain = "software.trypwood.jellysleeve"
-    private static let legacyKeychainService = "software.trypwood.jellysleeve"
-    private static let legacyKeychainAccount = "software.trypwood.jellysleeve.apikey"
+    // All derived from `LegacyIdentity.bundleID` (the single source of truth for
+    // the OLD identifier) — see its doc for why the value must stay `jellysleeve`.
+    private static let legacyDomain = LegacyIdentity.bundleID
+    private static let legacyKeychainService = LegacyIdentity.bundleID
+    private static let legacyKeychainAccount = LegacyIdentity.bundleID + ".apikey"
 
     /// Marks the migration done. Lives in the new domain, written LAST so a
     /// crash mid-migration re-runs cleanly rather than skipping forever.

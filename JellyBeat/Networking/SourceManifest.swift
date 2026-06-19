@@ -35,10 +35,10 @@ nonisolated enum SourceManifestLoader {
     /// JellyBeat shipped as **JellySleeve** through v0.2.x; bridges installed
     /// against the old build still write their `*.jellysource` manifests here, so
     /// discovery scans it too (after `defaultDirectory`, which wins collisions).
-    /// The old `jellysleeve` literal is retained deliberately — do NOT rename it.
-    /// See `IdentityMigrator`.
+    /// The old identifier lives in `LegacyIdentity.bundleID` (single source of
+    /// truth) — it must stay `jellysleeve` or pre-rename bridges stop being found.
     static var legacyDirectory: URL? {
-        sourcesDirectory(for: "software.trypwood.jellysleeve")
+        sourcesDirectory(for: LegacyIdentity.bundleID)
     }
 
     /// Directories scanned at launch, in precedence order: the current location
