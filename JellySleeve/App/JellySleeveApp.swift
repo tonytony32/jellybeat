@@ -25,10 +25,6 @@ struct JellySleeveApp: App {
             get: { menuBarIsInserted },
             set: { _ in }
         )) {
-            Button(String(localized: "Open Overlay")) {
-                appDelegate.showOverlay()
-            }
-            Divider()
             sourceSection
             Divider()
             SettingsLink {
