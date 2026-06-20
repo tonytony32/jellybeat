@@ -417,6 +417,78 @@ struct SourceArbiterTests {
         ) == false)
     }
 
+    // MARK: - Flip debounce (pure core)
+
+    /// A fixed epoch + window so the `now - lastFlipAt` boundary in branch (d) is
+    /// exact and deterministic (no wall-clock read).
+    private let flipDebounce: TimeInterval = 1.0
+    private let epoch = Date(timeIntervalSinceReferenceDate: 0)
+
+    /// (a) When the desired source already equals the current one there is
+    /// nothing to debounce — it short-circuits and returns immediately, even
+    /// inside the window with a non-forced both-active state.
+    @Test
+    func debouncedShortCircuitsWhenDesiredEqualsCurrent() {
+        #expect(SourceArbiter.debounced(
+            desired: .youtube, current: .youtube, currentStillActive: true,
+            forced: false, lastFlipAt: epoch, now: epoch.addingTimeInterval(0.1),
+            flipDebounce: flipDebounce
+        ) == .youtube)
+    }
+
+    /// (b) A forced selection flips immediately, even within the debounce window
+    /// — the window only guards the auto both-active tie-break.
+    @Test
+    func debouncedForcedFlipsImmediatelyInsideWindow() {
+        #expect(SourceArbiter.debounced(
+            desired: .youtube, current: .jellyfin, currentStillActive: true,
+            forced: true, lastFlipAt: epoch, now: epoch.addingTimeInterval(0.1),
+            flipDebounce: flipDebounce
+        ) == .youtube)
+    }
+
+    /// (c) When the current source has gone idle (`currentStillActive == false`)
+    /// there is no both-active ambiguity to damp, so it flips to a different
+    /// desired source immediately even inside the window. This is the
+    /// `autoRevealsHomeWhenCurrentSourceStops` path — stopping the active source
+    /// reveals another straight away rather than holding a dead cover.
+    @Test
+    func debouncedFlipsImmediatelyWhenCurrentWentIdle() {
+        #expect(SourceArbiter.debounced(
+            desired: .jellyfin, current: .youtube, currentStillActive: false,
+            forced: false, lastFlipAt: epoch, now: epoch.addingTimeInterval(0.1),
+            flipDebounce: flipDebounce
+        ) == .jellyfin)
+    }
+
+    /// (d) The both-active tie-break: a flip landing strictly inside the debounce
+    /// window holds the current source (anti-flap); the same flip once the window
+    /// has elapsed (`now - lastFlipAt >= flipDebounce`) goes through to the
+    /// desired source. `now` is supplied so the boundary is exact.
+    @Test
+    func debouncedHoldsInsideWindowAndFlipsAfter() {
+        // Inside the window (0.5 s < 1.0 s) → hold current.
+        #expect(SourceArbiter.debounced(
+            desired: .youtube, current: .jellyfin, currentStillActive: true,
+            forced: false, lastFlipAt: epoch, now: epoch.addingTimeInterval(0.5),
+            flipDebounce: flipDebounce
+        ) == .jellyfin)
+
+        // At the window boundary (1.0 s, not < 1.0 s) → flip to desired.
+        #expect(SourceArbiter.debounced(
+            desired: .youtube, current: .jellyfin, currentStillActive: true,
+            forced: false, lastFlipAt: epoch, now: epoch.addingTimeInterval(1.0),
+            flipDebounce: flipDebounce
+        ) == .youtube)
+
+        // Well past the window → flip to desired.
+        #expect(SourceArbiter.debounced(
+            desired: .youtube, current: .jellyfin, currentStillActive: true,
+            forced: false, lastFlipAt: epoch, now: epoch.addingTimeInterval(5.0),
+            flipDebounce: flipDebounce
+        ) == .youtube)
+    }
+
     // MARK: - Bridge → normalized mapping
 
     private func snapshot(
@@ -523,5 +595,146 @@ struct SourceArbiterTests {
     func durationJellyfinTicks() {
         #expect(Duration.seconds(1).jellyfinTicks == 10_000_000)
         #expect(Duration.seconds(2.5).jellyfinTicks == 25_000_000)
+    }
+}
+
+/// Integration coverage that drives the *real* `SourceArbiter.reevaluate`
+/// pipeline (presence → recency → decide → debounce → publish) through the public
+/// entry points — `activate()`, `PlayerStore.ingest`, and the source selection —
+/// rather than only the pure `decide` / `debounced` cores. This catches wiring
+/// regressions the unit tests can't: a mis-wired `current`, a decide/debounce
+/// reorder, or a publish that shows the `.idle` "Configure your Jellyfin server"
+/// prompt instead of the ambient loopback view.
+///
+/// The arbiter is built exactly as `AppDelegate` builds it, but over a throwaway
+/// `UserDefaults` suite with **no** Jellyfin server configured, so the coordinator
+/// stays `.idle` with no network, and the built-in YouTube feed polls a dead port
+/// (always idle). Jellyfin presence is injected through `PlayerStore.ingest`, the
+/// same path the live transport uses. Each test stays synchronous from
+/// `activate()` through its assertions, so the feeds' background poll tasks (which
+/// only run at a suspension point) can't interleave and every assertion is
+/// deterministic.
+@MainActor
+struct SourceArbiterIntegrationTests {
+    private static let userId = "user-1"
+
+    private struct Env {
+        let arbiter: SourceArbiter
+        let player: PlayerStore
+        let settings: SettingsStore
+        let suiteName: String
+    }
+
+    private func makeEnv(selection: SourceSelection = .auto) -> Env {
+        let suiteName = "test.arbiter.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let settings = SettingsStore(defaults: defaults, keychain: InMemoryKeychain())
+        settings.sourceSelection = selection                 // before activate(): no observation yet
+        let player = PlayerStore(defaults: defaults)
+        let coordinator = PlaybackConnectionCoordinator(
+            settings: settings, player: player, artworkProvider: ArtworkCacheProvider()
+        )
+        // `manifests: []` yields exactly the built-ins — Jellyfin + the YouTube
+        // loopback feed — the same shape AppDelegate gets with no plugins installed.
+        let arbiter = SourceArbiter(
+            settings: settings, player: player,
+            coordinator: coordinator, registry: SourceRegistry(manifests: [])
+        )
+        return Env(arbiter: arbiter, player: player, settings: settings, suiteName: suiteName)
+    }
+
+    private func tearDown(_ env: Env) {
+        env.arbiter.shutdown()   // stops feeds, removes the coordinator's sleep/wake observers
+        UserDefaults.standard.removePersistentDomain(forName: env.suiteName)
+    }
+
+    /// A Jellyfin session for `userId`, either playing or paused.
+    private func jellyfinSession(paused: Bool) -> Session {
+        Session(
+            id: "s1", userId: Self.userId, client: "Jellyfin Web", deviceName: "Test",
+            lastActivityDate: Date(),
+            nowPlayingItem: NowPlayingItem(
+                id: "jf-item", name: "Jellyfin Track", artists: ["Artist"],
+                albumArtist: "Artist", album: "Album", runTimeTicks: 1_800_000_000,
+                imageTags: nil, albumId: nil, albumPrimaryImageTag: nil, userData: nil
+            ),
+            playState: PlayState(positionTicks: 0, isPaused: paused, volumeLevel: 80),
+            nowPlayingQueueFullItems: nil, nowPlayingQueue: nil
+        )
+    }
+
+    /// Bug replay (the Jellyfin half of the sticky-pause scenario) through the
+    /// real `reevaluate` pipeline: a Jellyfin session that starts playing drives
+    /// the overlay, and *pausing* it must NOT flip away — with no other source
+    /// active, the home fallback keeps Jellyfin. Driving presence via
+    /// `PlayerStore.ingest` exercises the `decide → debounce → publish` chain and
+    /// the `current == activeKind` coupling end-to-end, not just the pure core.
+    @Test
+    func autoKeepsJellyfinWhenItPausesWithNoOtherSource() {
+        let env = makeEnv(selection: .auto)
+        env.arbiter.activate()
+
+        // (1) Jellyfin starts playing → it drives, overlay shows its track.
+        env.player.ingest(sessions: [jellyfinSession(paused: false)], userId: Self.userId)
+        #expect(env.arbiter.activeKind == .jellyfin)
+        #expect(env.player.jellyfinIsActiveSource == true)
+        #expect(env.player.currentTrack?.itemId == "jf-item")
+        #expect(env.player.connectionState == .connected)
+
+        // (2) Pause Jellyfin → stays Jellyfin (home fallback), no spurious flip.
+        env.player.ingest(sessions: [jellyfinSession(paused: true)], userId: Self.userId)
+        #expect(env.arbiter.activeKind == .jellyfin)
+        #expect(env.player.jellyfinIsActiveSource == true)
+        #expect(env.player.connectionState == .connected)
+
+        tearDown(env)
+    }
+
+    /// Render-layer guard for the loopback flip (the `publish` behavior from #34):
+    /// when a loopback source becomes active, the arbiter must publish a
+    /// `.connected` snapshot — never `.idle`, which the overlay renders as the
+    /// "Configure your Jellyfin server" prompt. Forcing `.youtube` makes the
+    /// initial `reevaluate` flip deterministically; with the feed idle (dead port)
+    /// the published snapshot is the ambient "nothing playing" view (`.connected`,
+    /// no track), not a false Jellyfin-misconfiguration alarm. Also pins the
+    /// flip's side effects: Jellyfin gated out and the loopback sink installed.
+    @Test
+    func loopbackFlipPublishesConnectedNeverIdlePrompt() {
+        let env = makeEnv(selection: .youtube)   // pin YouTube
+        env.arbiter.activate()                    // initial reevaluate flips to YouTube
+
+        #expect(env.arbiter.activeKind == .youtube)
+        #expect(env.player.jellyfinIsActiveSource == false)        // Jellyfin writes gated
+        #expect(env.player.capabilities == .loopbackDefault)       // sink swapped to loopback
+        #expect(env.player.connectionState == .connected)          // NOT the .idle prompt
+        #expect(env.player.isLinkLive)
+        #expect(env.player.currentTrack == nil)                    // ambient: connected, no track
+
+        tearDown(env)
+    }
+
+    /// The arbiter feeds its own `activeKind` as `decide`'s `current`, so with
+    /// nothing active the overlay holds the source it is already on rather than
+    /// snapping home. Pin YouTube, drop to `auto`, then drive a `reevaluate`
+    /// (empty Jellyfin ingest) with no source active: YouTube must be held. A
+    /// mis-wired `current` (e.g. a hardcoded `.jellyfin`) would flip to Jellyfin
+    /// here — swapping the sink and ungating Jellyfin — so the capability and
+    /// gating assertions catch the regression too.
+    @Test
+    func autoHoldsCurrentSourceWhenNothingActive() {
+        let env = makeEnv(selection: .youtube)
+        env.arbiter.activate()
+        #expect(env.arbiter.activeKind == .youtube)
+
+        // Drop to auto; nothing is playing anywhere (no Jellyfin sessions, the
+        // YouTube feed is idle). decide returns `current`, debounce short-circuits.
+        env.settings.sourceSelection = .auto
+        env.player.ingest(sessions: [], userId: Self.userId)
+
+        #expect(env.arbiter.activeKind == .youtube)            // held, not flipped home
+        #expect(env.player.capabilities == .loopbackDefault)   // no flip back to Jellyfin
+        #expect(env.player.jellyfinIsActiveSource == false)
+
+        tearDown(env)
     }
 }

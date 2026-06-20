@@ -275,14 +275,43 @@ final class SourceArbiter {
     /// oscillate. A forced selection, or the current source going idle, flips
     /// immediately — the window only guards the both-active ambiguity. Reads
     /// `currentStillActive` from the same per-pass presence map, so no source is
-    /// special-cased here either.
+    /// special-cased here either. Delegates to the pure `Self.debounced` core.
     private func debounced(_ desired: SourceID, presence: [SourceID: SourcePresence], forced: Bool) -> SourceID {
-        guard desired != activeKind else { return desired }
+        Self.debounced(
+            desired: desired,
+            current: activeKind,
+            currentStillActive: presence[activeKind]?.active ?? false,
+            forced: forced,
+            lastFlipAt: lastFlipAt,
+            now: Date(),
+            flipDebounce: Self.flipDebounce
+        )
+    }
+
+    /// Pure flip-debounce policy (extracted for testing), mirroring `decide` /
+    /// `shouldRefreshOnReconnect`. In order:
+    /// 1. `desired == current` → nothing to flip; return it.
+    /// 2. A forced selection flips immediately (the window only guards `auto`).
+    /// 3. The current source going idle (`currentStillActive == false`) flips
+    ///    immediately — there is no both-active ambiguity to damp.
+    /// 4. Otherwise (both active) a flip within `flipDebounce` of `lastFlipAt`
+    ///    holds `current` to avoid flapping; once the window has elapsed it flips
+    ///    to `desired`. `now` is injected so this boundary is deterministic in
+    ///    tests (no wall-clock read).
+    static func debounced(
+        desired: SourceID,
+        current: SourceID,
+        currentStillActive: Bool,
+        forced: Bool,
+        lastFlipAt: Date,
+        now: Date,
+        flipDebounce: TimeInterval
+    ) -> SourceID {
+        guard desired != current else { return desired }
         if forced { return desired }
-        let currentStillActive = presence[activeKind]?.active ?? false
         guard currentStillActive else { return desired }   // current went idle → flip now
-        if Date().timeIntervalSince(lastFlipAt) < Self.flipDebounce {
-            return activeKind                              // hold to avoid flapping
+        if now.timeIntervalSince(lastFlipAt) < flipDebounce {
+            return current                                 // hold to avoid flapping
         }
         return desired
     }
