@@ -1,4 +1,4 @@
-# JellyBeat — Recomendaciones y best practices
+# JellyBeat: recomendaciones y best practices
 
 Guía para reconstruir el proyecto desde cero sin repetir los errores que ya
 costó corregir. Complementa a [`PLAN.md`](plans/PLAN.md) (el *qué* y el orden de
@@ -109,7 +109,7 @@ son las clases que deberían existir.
 
 Cada `Task` de larga vida o reintento se guarda en una propiedad y se cancela
 antes de crear el siguiente. **Nunca dispares un `Task` con un `sleep` sin
-guardar su handle** — se acumulan.
+guardar su handle**, se te acumulan.
 
 ```swift
 private var reconnectTask: Task<Void, Never>?
@@ -225,7 +225,7 @@ código porque no son obvias:
 - **`MockURLProtocol`** + fixtures JSON reales del servidor para testear el
   cliente sin red.
 - **`@Suite(.serialized)`** cuando los tests tocan recursos compartidos del
-  proceso (UserDefaults, Keychain) — si no, se pisan en paralelo.
+  proceso (UserDefaults, Keychain): si no, se pisan en paralelo.
 - **Qué testear primero:** la capa de red (decoding, mapeo de errores, headers
   de auth) y la lógica de persistencia/migración. Son las que más se rompen en
   silencio.
@@ -243,7 +243,7 @@ código porque no son obvias:
 - **Marca los secretos como `.private`** en los formatters; el resto `.public`
   para que sea útil en Console.app.
 - Logea las transiciones de la máquina de estados (socket connected/failed,
-  fallback a polling, pause/resume) — son tu mejor herramienta de diagnóstico
+  fallback a polling, pause/resume), son tu mejor herramienta de diagnóstico
   sin debugger.
 
 ---

@@ -1,50 +1,74 @@
 # JellyBeat
 <img width="1424" height="810" alt=" 2026-06-19 a las 12 24 53" src="https://github.com/user-attachments/assets/4fd3d46b-bc88-421c-a0b5-7fa06ed3a045" />
 
-A floating now-playing overlay for macOS. Its home source is a remote
-Jellyfin server — mirrored over the REST API and `/socket` push — and it
-also picks up other players, like YouTube in Safari or any third-party
-loopback source. Inspired visually by [Sleeve by Replay][sleeve], built
-independently for Jellyfin — no AppleScript, no Apple Music dependency.
+A floating now-playing overlay for macOS. Home base is a remote Jellyfin
+server, mirrored over the REST API and the `/socket` push feed, but it'll also
+pick up whatever else is playing: YouTube in Safari, or any third-party
+loopback source. [Sleeve by Replay][sleeve] was the visual inspiration and nothing more: no
+port, no fork, not a line of its code. Everything under the hood is built from
+scratch for Jellyfin, with no AppleScript and no Apple Music dependency.
 
 [sleeve]: https://replay.software/sleeve
 
-> **Status — v0.3.0-beta.** Multi-source milestone, refined: a formal
-> third-party loopback plugin ABI, a Source-first menu bar with faithful theme
-> previews, and a round of overlay/reliability fixes. Tagged source betas only —
-> not packaged for distribution: no Developer ID signing, no notarised DMG.
+## Features
+
+- 🎵 **One overlay, every source.** Jellyfin is home, but YouTube, YouTube
+  Music and any loopback plugin get picked up on their own. Whatever you
+  started last is what you see.
+- 🪟 **There when you want it, gone when you don't.** A borderless window that
+  floats over every Space, then shrinks to just the artwork and disappears the
+  moment the music stops.
+- ⚡ **Real-time, not refresh-and-pray.** Sub-second updates over WebSocket,
+  with a REST fallback that steps in by itself if the socket drops.
+- 🎨 **Themes that actually rearrange things.** Standard, Classic, Minim and
+  Aero are real layout presets, not a recoloured skin.
+- ⌨️ **At home on your Mac.** Media keys, Control Center, the Touch Bar and the
+  system Now Playing module all just work, artwork included.
+- 📞 **Knows when to back off.** A call lands over Continuity or FaceTime and it
+  pauses Jellyfin for you. You decide when it comes back.
+- 🔒 **Your keys, your call.** API key encrypted in the Keychain by default,
+  and self-signed certs trusted only when you flip the switch.
+
+> **Status: v0.3.0-beta.** The multi-source milestone, tidied up: a proper
+> third-party loopback plugin ABI, a Source-first menu bar with theme previews
+> that actually look like the themes, and a round of overlay and reliability
+> fixes. These are tagged source betas, nothing more. Not packaged for
+> distribution yet: no Developer ID signing, no notarised DMG.
 
 ## What it does
 
-- **Mirrors more than one source.** Jellyfin is the home source; YouTube /
-  YouTube Music (via the [yt-safari-bridge](https://github.com/tonytony32/yt-safari-bridge.git) Safari extension) and any
-  third-party loopback plugin are picked up automatically. The most recently
-  started source drives the overlay, with a manual override in the menu-bar
-  **Source** picker. (See [Sources](#sources).)
-- Floats a borderless window over every Space showing the current track:
-  artwork, title, artist, album, and a progress bar that interpolates
-  smoothly between server updates.
-- Sub-second latency over a WebSocket connection to `/socket`; falls back
-  to REST polling if the socket can't establish or drops three times.
-- Four built-in themes (Standard, Classic, Minim, Aero) selectable from the
-  Appearance tab in Settings. Each one is a layout preset, not a colour swap —
-  switching themes resizes the window and rearranges the artwork / info /
-  controls.
-- Snaps to screen corners on drag, remembers its position per display.
-- Hands media keys (F7 / F8 / F9), the Control Center module, and the
-  Touch Bar to the same actions you'd use on the overlay buttons. The
-  current track shows up in the system Now Playing module with artwork.
-- Auto-pauses Jellyfin when a call starts on the Mac (an iPhone call relayed
-  over Continuity, or FaceTime). It doesn't auto-resume — you decide when.
-- Goes ambient when nothing is playing on any source: the window shrinks to
-  the artwork's exact pixels, becomes invisible, and pops back on hover with
-  the Jellyfin logo. One click launches the Safari "Add to Dock" web app for
-  the configured server if one is registered, or falls back to the default
-  browser otherwise.
-- Self-signed certificate trust is opt-in per server (useful for
-  Tailscale or Caddy setups behind an internal CA).
-- API key stored in the macOS Keychain by default (encrypted at rest).
-  Can be switched to the preferences plist via Settings if needed.
+- **It mirrors more than one source.** Jellyfin is home base, but YouTube and
+  YouTube Music (through the [yt-safari-bridge](https://github.com/tonytony32/yt-safari-bridge.git) Safari extension) and
+  any third-party loopback plugin get picked up on their own. Whatever you
+  started most recently drives the overlay, and there's a manual override in
+  the menu-bar **Source** picker if you want the last word. (More in
+  [Sources](#sources).)
+- It floats a borderless window over every Space with the current track:
+  artwork, title, artist, album, and a progress bar that glides smoothly
+  between server updates instead of jumping.
+- Sub-second latency over a WebSocket connection to `/socket`. If the socket
+  won't connect or drops three times, it quietly falls back to REST polling.
+- Four built-in themes (Standard, Classic, Minim, Aero), pick one from the
+  Appearance tab in Settings. Each is a full layout preset, not just a colour
+  swap: switching themes resizes the window and rearranges the artwork, the
+  info and the controls.
+- Snaps to the screen corners when you drag it, and remembers where you left it
+  on each display.
+- The media keys (F7, F8, F9), the Control Center module and the Touch Bar all
+  do the same thing the overlay buttons do. The current track also shows up in
+  the system Now Playing module, artwork included.
+- When a call comes in on the Mac (an iPhone call relayed over Continuity, or
+  FaceTime) it auto-pauses Jellyfin. It won't auto-resume though, that part is
+  on you.
+- When nothing is playing anywhere, it goes ambient: the window shrinks to the
+  exact pixels of the artwork, turns invisible, and pops back on hover with the
+  Jellyfin logo. One click opens the Safari "Add to Dock" web app for your
+  configured server, or the default browser if you haven't registered one.
+- Trusting self-signed certificates is opt-in, per server (handy for Tailscale
+  or Caddy setups sitting behind an internal CA).
+- Your API key lives in the macOS Keychain by default, encrypted at rest. You
+  can move it to the preferences plist from Settings if you ever need to,
+  though it's less safe there.
 
 ## Requirements
 
@@ -56,8 +80,8 @@ independently for Jellyfin — no AppleScript, no Apple Music dependency.
 
 ## Build
 
-The project is a vanilla SwiftUI / AppKit hybrid with no external
-dependencies. Open in Xcode 26.5 or later:
+It's a vanilla SwiftUI and AppKit hybrid, zero external dependencies. Open it
+in Xcode 26.5 or later:
 
 ```sh
 git clone https://github.com/tonytony32/jellybeat.git
@@ -65,53 +89,53 @@ cd jellybeat
 open JellyBeat.xcodeproj
 ```
 
-Or build from the command line:
+Or build it straight from the command line:
 
 ```sh
 xcodebuild -project JellyBeat.xcodeproj -scheme JellyBeat \
            -configuration Release build
 ```
 
-The resulting `.app` lands in `~/Library/Developer/Xcode/DerivedData/…`;
-copy it to `/Applications` to launch via Spotlight / Launchpad.
+The `.app` lands somewhere under `~/Library/Developer/Xcode/DerivedData/…`.
+Copy it into `/Applications` and you can launch it from Spotlight or Launchpad
+like anything else.
 
 ## Configure
 
 Open Settings (`⌘,`) and fill in the Server tab:
 
-- **Base URL** — full URL with scheme and port, e.g.
+- **Base URL**: the full URL, scheme and port included, e.g.
   `http://192.168.3.80:8096` or `https://jellyfin.example.com`.
-- **API key** — generated in the Jellyfin dashboard.
-- **User ID** — your user's GUID; visible in the URL on your user's
+- **API key**: the one you generated in the Jellyfin dashboard.
+- **User ID**: your user's GUID. You'll find it in the URL of your user's
   edit page in the dashboard.
-- **Allow self-signed certificates** — only enable when you know what
-  this means.
-- **Store API key in UserDefaults** — off by default. The API key is
-  stored encrypted in the macOS Keychain by default. Enable only if
-  you need the key to survive a Keychain reset or for a specific
-  migration reason (less secure: the key will be readable in the
-  preferences plist).
+- **Allow self-signed certificates**: only turn this on if you actually know
+  what it means.
+- **Store API key in UserDefaults**: off by default, and best left that way.
+  The key sits encrypted in the macOS Keychain otherwise. Only flip it on if
+  you need the key to survive a Keychain reset or for some specific migration,
+  and go in knowing the trade-off: it'll be readable in the preferences plist.
 
-Hit **Test connection** to verify. A green check with the server name and
-version means you're good.
+Hit **Test connection** to check. A green tick with the server name and
+version means you're good to go.
 
 ## Sources
 
-JellyBeat can mirror and remote-control more than one backend, and shows
-whichever one is actually playing:
+JellyBeat can mirror and remote-control more than one backend, and it always
+shows whichever one is actually playing:
 
-- **Jellyfin** — the privileged built-in (WebSocket + REST) and the "home"
-  source the overlay falls back to when nothing else is playing.
-- **YouTube / YouTube Music** — surfaced by the [yt-safari-bridge](https://github.com/tonytony32/yt-safari-bridge.git) Safari Web
+- **Jellyfin**: the privileged built-in (WebSocket and REST), and the home
+  source the overlay falls back to when nothing else is going.
+- **YouTube and YouTube Music**: surfaced by the [yt-safari-bridge](https://github.com/tonytony32/yt-safari-bridge.git) Safari Web
   Extension as a local loopback source on `127.0.0.1`.
-- **Third-party plugins** — any local process that speaks the loopback ABI and
+- **Third-party plugins**: any local process that speaks the loopback ABI and
   drops a `*.jellysource` manifest into
-  `~/Library/Application Support/software.trypwood.jellybeat/Sources/`. No app
-  code change is required.
+  `~/Library/Application Support/software.trypwood.jellybeat/Sources/`. No
+  change to the app's own code needed.
 
-Selection is automatic — the most recently started source wins — with a manual
+Selection runs itself: the most recently started source wins, with a manual
 override in the menu-bar **Source** picker. The arbiter and the plugin contract
-are documented in [`docs/architecture.md`](docs/architecture.md) and
+are written up in [`docs/architecture.md`](docs/architecture.md) and
 [`docs/loopback-source-abi-v1.md`](docs/loopback-source-abi-v1.md).
 
 ## Layout
@@ -137,36 +161,37 @@ LICENSE                       # AGPL-3.0
 
 ### Architecture
 
-The app layer is a thin coordinator over several focused collaborators rather
-than one catch-all delegate:
+The app layer is a thin coordinator sitting over a handful of focused
+collaborators, rather than one catch-all delegate that does everything:
 
-- **`AppDelegate`** — owns the shared stores (`SettingsStore`, `PlayerStore`,
+- **`AppDelegate`**: owns the shared stores (`SettingsStore`, `PlayerStore`,
   `ThemeRegistry`, `ArtworkCacheProvider`) plus the `SourceArbiter` and
-  `SourceRegistry`, and wires the collaborators together. It holds almost no
-  logic of its own.
-- **`OverlayWindowController`** — all window geometry: creating the borderless
-  window, applying level/opacity, the theme- and player-driven resize between
-  the full and ambient layouts, edge/corner snapping, and per-display position
-  persistence.
-- **`PlaybackConnectionCoordinator`** — the Jellyfin playback-feed state machine:
-  WebSocket-preferred transport with REST-polling fallback, the reconnection
-  policy, sleep/wake handling, and the debounced reconfigure when connection
+  `SourceRegistry`, and wires everyone together. It barely holds any logic of
+  its own.
+- **`OverlayWindowController`**: everything about window geometry. Creating the
+  borderless window, setting level and opacity, the theme- and player-driven
+  resize between the full and ambient layouts, edge and corner snapping, and
+  remembering the position per display.
+- **`PlaybackConnectionCoordinator`**: the Jellyfin playback-feed state machine.
+  WebSocket first with REST polling as the fallback, the reconnection policy,
+  sleep and wake handling, and the debounced reconfigure when connection
   settings change.
-- **`SourceArbiter` + `SourceRegistry`** — the multi-source layer. The registry
-  owns one feed per loopback source (built-in YouTube + any discovered plugins);
-  the arbiter decides whether Jellyfin or a loopback source drives the overlay
-  and gates the writes so only the active one shows. Full design in
-  [`docs/architecture.md`](docs/architecture.md).
+- **`SourceArbiter` and `SourceRegistry`**: the multi-source layer. The registry
+  keeps one feed per loopback source (built-in YouTube plus any plugins it
+  finds), and the arbiter decides whether Jellyfin or a loopback source drives
+  the overlay, gating the writes so only the active one ever shows. Full design
+  in [`docs/architecture.md`](docs/architecture.md).
 
 Window-visibility events that should pause or resume the feed (miniaturise,
-close, deminiaturise) flow from the window controller to the connection
-coordinator through closures, so neither holds a direct reference to the other.
+close, deminiaturise) travel from the window controller to the connection
+coordinator through closures, so neither one has to hold a direct reference to
+the other.
 
-Data flows one way up the layers — **Networking → State → UI**. The transport
-clients decode raw models; `PlayerStore` runs the active-session heuristic and
-holds the single source of truth for the overlay; the SwiftUI views and themes
-read it. The shared transport vocabulary (`PlaybackAction`) lives in the State
-layer so the store never depends on a view type.
+Data flows one way up the layers: **Networking → State → UI**. The transport
+clients decode the raw models, `PlayerStore` runs the active-session heuristic
+and holds the single source of truth for the overlay, and the SwiftUI views and
+themes just read from it. The shared transport vocabulary (`PlaybackAction`)
+lives in the State layer so the store never has to depend on a view type.
 
 ## Tests
 
@@ -178,28 +203,29 @@ xcodebuild -project JellyBeat.xcodeproj -scheme JellyBeat \
 Around 90 unit tests (Swift Testing) cover the networking and state layers:
 REST fixture decoding, HTTP error mapping and the `X-Emby-Token` auth header,
 Keychain storage and the UserDefaults→Keychain migration, the loopback source
-ABI client, and the multi-source layer — the pure `SourceArbiter.decide`
+ABI client, and the multi-source layer itself (the pure `SourceArbiter.decide`
 policy, activation recency, bridge→snapshot mapping, artwork-scheme hardening,
-and `PlayerStore` source-gating. The WebSocket client and the SwiftUI layer
-aren't directly under test.
+and `PlayerStore` source-gating). The WebSocket client and the SwiftUI layer
+aren't directly under test, fair warning.
 
 ## Support and maintenance
 
-JellyBeat is a personal hobby project. Use it as you would any other
-piece of AGPL-3.0-licensed software: **best effort, no warranty, no SLA on
-issue triage or PR review.**
+JellyBeat is a personal hobby project. Treat it like any other bit of
+AGPL-3.0-licensed software: **best effort, no warranty, and no SLA on issue
+triage or PR review.**
 
-- Bug reports and feature requests are welcome — see the templates in
+- Bug reports and feature requests are welcome, there are templates waiting in
   [`.github/ISSUE_TEMPLATE/`](.github/ISSUE_TEMPLATE/).
-- Contributions: read [`CONTRIBUTING.md`](CONTRIBUTING.md). No CLA.
+- Want to contribute? Read [`CONTRIBUTING.md`](CONTRIBUTING.md) first. No CLA.
 - Maintenance policy: [`docs/MAINTENANCE.md`](docs/MAINTENANCE.md).
-- Security-sensitive reports go to email rather than a public issue —
-  see `CONTRIBUTING.md`.
+- Security-sensitive reports go to email, not a public issue. Details in
+  `CONTRIBUTING.md`.
 
 ## Acknowledgements
 
-Visual inspiration from [Sleeve by Replay][sleeve]; built independently
-for Jellyfin. The Jellyfin logo asset comes from the
+Visual inspiration from [Sleeve by Replay][sleeve], and that's where it ends:
+built independently for Jellyfin, nothing borrowed under the hood. The Jellyfin
+logo asset comes from the
 [`jellyfin/jellyfin-ux`](https://github.com/jellyfin/jellyfin-ux) repo
 under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
 
