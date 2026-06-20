@@ -20,9 +20,9 @@ assignees: ''
 
 ---
 
-**Heads up:** before opening, please check [the no-goals list in the
-plan](../../docs/plans/PLAN.md) (section 7) — JellyBeat is intentionally
-scoped to a single backend (Jellyfin) and does not aim to play audio
-locally, scrobble client-side, sync via iCloud, or ship on the Mac App
-Store. Requests that contradict the plan's principles will be closed
+**Heads up:** before you open this, take a look at [the no-goals list in
+the plan](../../docs/plans/PLAN.md) (section 7). JellyBeat is deliberately
+scoped to a single backend (Jellyfin); it isn't trying to play audio
+locally, scrobble client-side, sync over iCloud, or ship on the Mac App
+Store. Anything that goes against the plan's principles gets closed
 politely.
