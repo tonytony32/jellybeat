@@ -1,33 +1,20 @@
 # JellyBeat
 <img width="1424" height="810" alt=" 2026-06-19 a las 12 24 53" src="https://github.com/user-attachments/assets/4fd3d46b-bc88-421c-a0b5-7fa06ed3a045" />
 
-A floating now-playing overlay for macOS. Home base is a remote Jellyfin
-server, mirrored over the REST API and the `/socket` push feed, but it'll also
-pick up whatever else is playing: YouTube in Safari, or any third-party
-loopback source. [Sleeve by Replay][sleeve] was the visual inspiration and nothing more: no
-port, no fork, not a line of its code. Everything under the hood is built from
-scratch for Jellyfin, with no AppleScript and no Apple Music dependency.
+A floating now-playing overlay for macOS. Home base is a remote Jellyfin server, mirrored over the REST API and the `/socket` push feed, but it'll also
+pick up whatever else is playing: YouTube in Safari, or any third-party loopback source. [Sleeve by Replay][sleeve] was the visual inspiration. Everything under the hood is built from scratch for Jellyfin, with no AppleScript and no Apple Music dependency.
 
 [sleeve]: https://replay.software/sleeve
 
 ## Features
 
-- 🎵 **One overlay, every source.** Jellyfin is home, but YouTube, YouTube
-  Music and any loopback plugin get picked up on their own. Whatever you
-  started last is what you see.
-- 🪟 **There when you want it, gone when you don't.** A borderless window that
-  floats over every Space, then shrinks to just the artwork and disappears the
-  moment the music stops.
-- ⚡ **Real-time, not refresh-and-pray.** Sub-second updates over WebSocket,
-  with a REST fallback that steps in by itself if the socket drops.
-- 🎨 **Themes that actually rearrange things.** Standard, Classic, Minim and
-  Aero are real layout presets, not a recoloured skin.
-- ⌨️ **At home on your Mac.** Media keys, Control Center, the Touch Bar and the
-  system Now Playing module all just work, artwork included.
-- 📞 **Knows when to back off.** A call lands over Continuity or FaceTime and it
-  pauses Jellyfin for you. You decide when it comes back.
-- 🔒 **Your keys, your call.** API key encrypted in the Keychain by default,
-  and self-signed certs trusted only when you flip the switch.
+- 🎵 **One overlay, every source.** Jellyfin is home, but YouTube, YouTube Music and any loopback plugin get picked up on their own. Whatever you started last is what you see.
+- 🪟 **There when you want it, gone when you don't.** A borderless window that floats over every Space, then shrinks to just the artwork and disappears the moment the music stops.
+- ⚡ **Real-time, not refresh-and-pray.** Sub-second updates over WebSocket, with a REST fallback that steps in by itself if the socket drops.
+- 🎨 **Themes that actually rearrange things.** Standard, Classic, Minim and Aero are real layout presets, not a recoloured skin.
+- ⌨️ **At home on your Mac.** Media keys, Control Center, the Touch Bar and the system Now Playing module all just work, artwork included.
+- 📞 **Knows when to back off.** A call lands over Continuity or FaceTime and it pauses Jellyfin for you. You decide when it comes back.
+- 🔒 **Your keys, your call.** API key encrypted in the Keychain by default, and self-signed certs trusted only when you flip the switch.
 
 > **Status: v0.3.0-beta.** The multi-source milestone, tidied up: a proper
 > third-party loopback plugin ABI, a Source-first menu bar with theme previews
@@ -37,38 +24,16 @@ scratch for Jellyfin, with no AppleScript and no Apple Music dependency.
 
 ## What it does
 
-- **It mirrors more than one source.** Jellyfin is home base, but YouTube and
-  YouTube Music (through the [yt-safari-bridge](https://github.com/tonytony32/yt-safari-bridge.git) Safari extension) and
-  any third-party loopback plugin get picked up on their own. Whatever you
-  started most recently drives the overlay, and there's a manual override in
-  the menu-bar **Source** picker if you want the last word. (More in
-  [Sources](#sources).)
-- It floats a borderless window over every Space with the current track:
-  artwork, title, artist, album, and a progress bar that glides smoothly
-  between server updates instead of jumping.
-- Sub-second latency over a WebSocket connection to `/socket`. If the socket
-  won't connect or drops three times, it quietly falls back to REST polling.
-- Four built-in themes (Standard, Classic, Minim, Aero), pick one from the
-  Appearance tab in Settings. Each is a full layout preset, not just a colour
-  swap: switching themes resizes the window and rearranges the artwork, the
-  info and the controls.
-- Snaps to the screen corners when you drag it, and remembers where you left it
-  on each display.
-- The media keys (F7, F8, F9), the Control Center module and the Touch Bar all
-  do the same thing the overlay buttons do. The current track also shows up in
-  the system Now Playing module, artwork included.
-- When a call comes in on the Mac (an iPhone call relayed over Continuity, or
-  FaceTime) it auto-pauses Jellyfin. It won't auto-resume though, that part is
-  on you.
-- When nothing is playing anywhere, it goes ambient: the window shrinks to the
-  exact pixels of the artwork, turns invisible, and pops back on hover with the
-  Jellyfin logo. One click opens the Safari "Add to Dock" web app for your
-  configured server, or the default browser if you haven't registered one.
-- Trusting self-signed certificates is opt-in, per server (handy for Tailscale
-  or Caddy setups sitting behind an internal CA).
-- Your API key lives in the macOS Keychain by default, encrypted at rest. You
-  can move it to the preferences plist from Settings if you ever need to,
-  though it's less safe there.
+- **It mirrors more than one source.** Jellyfin is home base, but YouTube and YouTube Music (through the [yt-safari-bridge](https://github.com/tonytony32/yt-safari-bridge.git) Safari extension) and any third-party loopback plugin get picked up on their own. Whatever you started most recently drives the overlay, and there's a manual override in the menu-bar **Source** picker if you want the last word. (More in [Sources](#sources).)
+- It floats a borderless window over every Space with the current track: artwork, title, artist, album, and a progress bar that glides smoothly between server updates instead of jumping.
+- Sub-second latency over a WebSocket connection to `/socket`. If the socket won't connect or drops three times, it quietly falls back to REST polling.
+- Four built-in themes (Standard, Classic, Minim, Aero), pick one from the Appearance tab in Settings. Each is a full layout preset, not just a colour swap: switching themes resizes the window and rearranges the artwork, the info and the controls.
+- Snaps to the screen corners when you drag it, and remembers where you left it on each display.
+- The media keys (F7, F8, F9), the Control Center module and the Touch Bar all do the same thing the overlay buttons do. The current track also shows up in the system Now Playing module, artwork included.
+- When a call comes in on the Mac (an iPhone call relayed over Continuity, or FaceTime) it auto-pauses Jellyfin. It won't auto-resume though, that part is on you.
+- When nothing is playing anywhere, it goes ambient: the window shrinks to the exact pixels of the artwork, turns invisible, and pops back on hover with the Jellyfin logo. One click opens the Safari "Add to Dock" web app for your configured server, or the default browser if you haven't registered one.
+- Trusting self-signed certificates is opt-in, per server (handy for Tailscale or Caddy setups sitting behind an internal CA).
+- Your API key lives in the macOS Keychain by default, encrypted at rest. You can move it to the preferences plist from Settings if you ever need to, though it's less safe there.
 
 ## Requirements
 
@@ -223,9 +188,7 @@ triage or PR review.**
 
 ## Acknowledgements
 
-Visual inspiration from [Sleeve by Replay][sleeve], and that's where it ends:
-built independently for Jellyfin, nothing borrowed under the hood. The Jellyfin
-logo asset comes from the
+Visual inspiration from [Sleeve by Replay][sleeve], built independently for Jellyfin. The Jellyfin logo asset comes from the
 [`jellyfin/jellyfin-ux`](https://github.com/jellyfin/jellyfin-ux) repo
 under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
 
