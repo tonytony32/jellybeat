@@ -126,6 +126,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         applyPresence(settings.appPresence)
         trackPresenceChanges()
+
+        // The YouTube (Safari) source is backed by the YTBridge host app. Run it only while
+        // JellyBeat runs — launch now if the source is enabled, and react to the toggle after.
+        if settings.youtubeBridgeEnabled {
+            YouTubeBridgeHost.start()
+        }
+        trackBridgeEnabled()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -136,6 +143,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         arbiter.shutdown()
         windowController.shutdown()
+        // Take the bridge host down with us (it also self-quits when it sees us go).
+        YouTubeBridgeHost.stop()
     }
 
     /// Keep the process alive when the overlay window is closed; the user
@@ -164,6 +173,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 self.applyPresence(self.settings.appPresence)
                 self.trackPresenceChanges()
+            }
+        }
+    }
+
+    /// Start/stop the YTBridge host when the user toggles the YouTube (Safari) source.
+    private func trackBridgeEnabled() {
+        withObservationTracking {
+            _ = settings.youtubeBridgeEnabled
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if self.settings.youtubeBridgeEnabled {
+                    YouTubeBridgeHost.start()
+                } else {
+                    YouTubeBridgeHost.stop()
+                }
+                self.trackBridgeEnabled()
             }
         }
     }

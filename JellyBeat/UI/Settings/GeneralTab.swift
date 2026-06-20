@@ -21,6 +21,13 @@ struct GeneralTab: View {
                 Toggle("Launch at login", isOn: $settings.launchAtLogin)
             }
 
+            Section("Sources") {
+                Toggle("YouTube (Safari) bridge", isOn: $settings.youtubeBridgeEnabled)
+                Text("Shows YouTube / YouTube Music playback as a source. JellyBeat runs the Safari bridge only while it's open — no background process at login.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("About") {
                 LabeledContent("Version", value: appVersion)
 

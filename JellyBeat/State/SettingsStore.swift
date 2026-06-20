@@ -86,6 +86,16 @@ final class SettingsStore {
         }
     }
 
+    /// Whether the built-in YouTube (Safari) source is enabled. When on, JellyBeat launches the
+    /// YTBridge host for as long as it runs; when off, it terminates it and the source stays
+    /// idle. Default on. `AppDelegate` observes this and starts/stops the host accordingly —
+    /// so the Safari bridge runs exactly while JellyBeat does, with no login item.
+    var youtubeBridgeEnabled: Bool {
+        didSet {
+            defaults.set(youtubeBridgeEnabled, forKey: Keys.youtubeBridgeEnabled)
+        }
+    }
+
     var launchAtLogin: Bool {
         didSet {
             do {
@@ -174,6 +184,7 @@ final class SettingsStore {
 
         self.appPresence = AppPresence(rawValue: defaults.string(forKey: Keys.appPresence) ?? "") ?? .dockAndMenuBar
         self.sourceSelection = SourceSelection(rawValue: defaults.string(forKey: Keys.sourceSelection) ?? "") ?? .auto
+        self.youtubeBridgeEnabled = (defaults.object(forKey: Keys.youtubeBridgeEnabled) as? Bool) ?? true
         self.launchAtLogin = SMAppService.mainApp.status == .enabled
 
         self.baseURLString = (defaults.string(forKey: Keys.baseURL) ?? "")
@@ -257,6 +268,7 @@ final class SettingsStore {
     enum Keys {
         static let appPresence = "settings.appPresence"
         static let sourceSelection = "settings.sourceSelection"
+        static let youtubeBridgeEnabled = "settings.youtubeBridgeEnabled"
         static let baseURL = "settings.baseURL"
         static let userId = "settings.userId"
         static let allowSelfSigned = "settings.allowSelfSigned"
