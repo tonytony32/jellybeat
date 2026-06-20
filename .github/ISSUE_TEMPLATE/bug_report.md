@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Something went wrong — UI glitched, command failed, app crashed, etc.
+about: Something broke. A UI glitch, a command that failed, a crash, that kind of thing.
 title: ''
 labels: bug
 assignees: ''

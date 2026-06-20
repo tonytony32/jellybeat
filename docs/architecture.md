@@ -1,6 +1,6 @@
-# JellyBeat — Architecture
+# JellyBeat Architecture
 
-Reference for how JellyBeat is put together, with emphasis on the
+A reference for how JellyBeat is put together, with the emphasis on the
 **multi-source playback** system (Jellyfin + YouTube bridge, arbitrated). For
 the *why* behind the conventions see [`BEST_PRACTICES.md`](BEST_PRACTICES.md);
 for the original feature plan see
@@ -10,8 +10,8 @@ for the original feature plan see
 
 A native macOS app (SwiftUI + AppKit, **no external dependencies**) that shows a
 floating "now playing" overlay and remote-controls whatever is currently
-playing — **Jellyfin** or **YouTube / YouTube Music** — picking the source
-automatically, with a manual override in the menu bar.
+playing, be it **Jellyfin** or **YouTube / YouTube Music**, picking the source
+automatically with a manual override in the menu bar.
 
 ## 2. Layering
 
@@ -32,7 +32,7 @@ UI/          OverlayView + themes + components (read PlayerStore, send commands)
 
 - `PlayerStore`, `SettingsStore`, `LoopbackSourceFeed`, `SourceRegistry`,
   `SourceArbiter`, `PlaybackConnectionCoordinator` are **`@MainActor`** (and the
-  stores are `@Observable`). The UI observes them directly — no Combine.
+  stores are `@Observable`). The UI observes them directly, no Combine.
 - `PlaybackPoller` is an **`actor`**.
 - Clients (`JellyfinClient`, `LoopbackSourceClient`) and all snapshot/contract
   value types are **`nonisolated` `Sendable` structs** with `async throws`
@@ -41,9 +41,9 @@ UI/          OverlayView + themes + components (read PlayerStore, send commands)
 
 > **Key consequence for arbitration:** because every component that writes the
 > shared overlay state runs on the main actor, "only the active source writes
-> state" is enforced by *serialization* — two sources can never interleave a
-> write mid-execution. The gate flag (below) just decides *whether* a write
-> happens, not against a race.
+> state" is enforced by *serialization*: two sources can never interleave a
+> write mid-execution. The gate flag (below) only decides *whether* a write
+> happens, it isn't guarding against a race.
 
 ## 3. Playback feeds & the source registry
 
@@ -62,7 +62,7 @@ one **non-loopback** source and keeps this dedicated transport.
 ### Loopback sources (built-in YouTube + third-party plugins)
 
 Every other source speaks the **loopback `PlaybackSource` ABI**
-([`loopback-source-abi-v1.md`](loopback-source-abi-v1.md)) — a tiny HTTP API on a
+([`loopback-source-abi-v1.md`](loopback-source-abi-v1.md)), a tiny HTTP API on a
 `127.0.0.1` port. `LoopbackSourceClient` (`nonisolated struct`, parameterized by
 `baseURL` + `pathPrefix`) is the consumer; `LoopbackSourceFeed` (`@MainActor`)
 polls it once a second, mapping each `BridgeSnapshot` → the normalized
@@ -75,16 +75,16 @@ derives the arbiter's id ordering and home/tie priorities:
   Web Extension), now expressed as a descriptor rather than a special case.
 - **Third-party:** any `*.jellysource` manifest in
   `~/Library/Application Support/software.trypwood.jellybeat/Sources/` (scanned
-  once at launch — see §10).
+  once at launch, see §10).
 
 Contract essentials (frozen from YouTube's behavior):
 - A **refused connection is "idle", never an error**.
 - `GET {prefix}/now-playing` → `BridgeSnapshot` → `ExternalPlayback`.
-- `GET {prefix}/health` → `SourceCapabilities` — the single source of truth for
+- `GET {prefix}/health` → `SourceCapabilities`, the single source of truth for
   what the running process supports (a manifest can't overstate it).
 - `POST {prefix}/command` ← transport commands (`PlaybackCommanding`).
 - Every string field is **untrusted page content**; artwork URLs are
-  scheme-restricted to `http`/`https`. The port is unauthenticated — accepted
+  scheme-restricted to `http`/`https`. The port is unauthenticated, an accepted
   residual risk (ABI doc §7).
 
 ## 4. The command sink (`PlaybackCommanding`)
@@ -103,22 +103,22 @@ protocol PlaybackCommanding: Sendable {
 }
 ```
 
-- **`JellyfinCommandSink`** — adapts `JellyfinClient` (whose methods are keyed by
+- **`JellyfinCommandSink`** adapts `JellyfinClient` (whose methods are keyed by
   a session id). Rebuilt per active session inside `PlayerStore.ingest`, so the
   captured `sessionId` always targets the mirrored device. Units: `Duration` →
   Jellyfin ticks; volume 0–100; favorites supported.
-- **`LoopbackSourceClient`** — `toggle`/`next`/`previous` map 1:1; `seek` value =
-  seconds; `setVolume` value = percent/100; the favorite is the source's **"like"**
-  (idempotent `like`/`unlike`, rendered as a thumbs-up via
-  `SourceCapabilities.favoriteStyle`), and the `liked` field from each poll is the
-  authoritative state — `PlayerStore` trusts it for loopback sources, so a like
+- **`LoopbackSourceClient`** handles the loopback side: `toggle`/`next`/`previous`
+  map 1:1; `seek` value = seconds; `setVolume` value = percent/100; the favorite
+  is the source's **"like"** (idempotent `like`/`unlike`, rendered as a thumbs-up
+  via `SourceCapabilities.favoriteStyle`), and the `liked` field from each poll is
+  the authoritative state. `PlayerStore` trusts it for loopback sources, so a like
   made in the source (e.g. the browser) stays in sync. One instance per loopback
   source (built-in YouTube + third-party manifests).
 
 `PlayerStore` holds a `commandSink` (transport) **and** a `client:
 JellyfinClient?` (for the Jellyfin-only operations the sink doesn't model:
 Instant Mix, queue jumps, authoritative favorite reads). The Jellyfin-only ops
-are dormant for a loopback source — `capabilities` hides their UI and the arbiter
+are dormant for a loopback source: `capabilities` hides their UI and the arbiter
 gates the writes.
 
 ## 5. The arbiter (`SourceArbiter`)
@@ -146,9 +146,9 @@ The arbiter `reevaluate`s on: each loopback poll (`feed.onUpdate` →
 ### Live capability refresh
 
 A loopback source's `/health` capabilities are read on a flip to it. They're
-**also** re-read when that source *reconnects* — its feed crosses idle→active
+**also** re-read when that source *reconnects*: its feed crosses idle→active
 (e.g. its bridge is rebuilt to advertise a new capability) while it's already the
-active source and no flip happened this pass — so a live capability change lands
+active source and no flip happened this pass, so a live capability change lands
 within one poll, with no restart (pure, tested: `shouldRefreshOnReconnect`).
 
 ### Decision policy (pure, tested: `SourceArbiter.decide`)
@@ -166,23 +166,23 @@ auto, nothing active          → keep current (last source)
 ```
 
 - **Sticky pause, not eager home-reveal.** When nothing is playing, the overlay
-  *stays* on the current source as long as it still has a (paused) session —
-  pausing what you're using must not hand control to a source merely parked in
+  *stays* on the current source as long as it still has a (paused) session.
+  Pausing what you're using must not hand control to a source merely parked in
   the background. Only once the current source goes fully idle (stopped / tab
   closed) does the overlay defer to `homePriority`. So *pausing* YouTube keeps
   YouTube (even with a long-paused Jellyfin session lingering), while *stopping*
   it still surfaces the parked Jellyfin.
 - **Two explicit priority lists, not one.** `homePriority` (`[.jellyfin,
   .youtube]`) picks the fallback when the current source has gone idle and others
-  are still parked — Jellyfin, the "home" source, first. `tiePriority`
+  are still parked: Jellyfin, the "home" source, first. `tiePriority`
   (`[.youtube, .jellyfin]`) breaks an equal-rank both-playing tie in YouTube's
   favor. The two answers genuinely differ, so they're separate orderings, not
   derived from one list.
 - **Most-recently-activated, not -changed.** Recency is bumped only on a
   source's **idle→active edge** (the user *starting* it), tracked by the pure,
   N-source `ActivationRecency` (a monotonic-tick rank per `SourceKind`). A source
-  that stays continuously active — e.g. a Jellyfin playlist **auto-advancing** in
-  the background — never re-activates, so it cannot out-rank and **steal** the
+  that stays continuously active (e.g. a Jellyfin playlist **auto-advancing** in
+  the background) never re-activates, so it cannot out-rank and **steal** the
   overlay from what the user is actually watching. Deliberately starting a source
   still wins.
 - **Flip debounce.** A *tie-break* flip (both active) landing within 1 s of the
@@ -195,10 +195,10 @@ Rather than literally pausing the loser's transport (which would make
 auto-flip-*back* undetectable while a paused tab keeps reporting active), **both
 feeds keep running** and the arbiter gates *writes*:
 
-- `PlayerStore.jellyfinIsActiveSource` (default `true`) — when `false`,
+- `PlayerStore.jellyfinIsActiveSource` (default `true`): when `false`,
   Jellyfin's `ingest` and `updateConnection` writes are dropped, but `ingest`
   still refreshes the **presence signals** (`jellyfinHasNowPlaying`,
-  `jellyfinIsPlaying`) and fires `onJellyfinUpdate`. So Jellyfin's liveness
+  `jellyfinIsPlaying`) and fires `onJellyfinUpdate`, so Jellyfin's liveness
   stays observable even while YouTube drives.
 - When YouTube wins, the arbiter writes its snapshot via
   `PlayerStore.applyExternalSnapshot(...)` (reusing the same optimistic-update
@@ -212,10 +212,10 @@ check, so the very poll that detects Jellyfin starting both flips the arbiter
 The mirror direction is atomic too: a Jellyfin tick that *flips onto* a loopback
 source (e.g. Jellyfin stops and a parked YouTube is revealed) publishes that
 source's snapshot on the same pass (`publish = didFlip`), so the overlay cover,
-the menu's `activeKind`, and the command sink all land on YouTube together —
+the menu's `activeKind`, and the command sink all land on YouTube together,
 rather than the cover lagging by one poll.
 
-## 6. `PlayerStore` — single source of truth
+## 6. `PlayerStore`: the single source of truth
 
 `@MainActor @Observable`. The overlay reads it; the UI calls its command
 vocabulary. Notable seams added for multi-source:
@@ -244,11 +244,11 @@ the post-command "didn't respond" check) is **preserved** and now source-agnosti
 - **YouTube** sets it to the bridge's `artworkUrl` → `ArtworkView` loads it
   directly. Only `http`/`https` schemes are dereferenced (hardening: the bridge
   port is unauthenticated, so an untrusted `file://` must never become a local
-  read — restricted at both the mapping boundary and in `ArtworkView`).
+  read, restricted at both the mapping boundary and in `ArtworkView`).
 
 ## 8. Settings & menu
 
-- `SettingsStore.sourceSelection` — `auto` or a specific source id (`jellyfin`,
+- `SettingsStore.sourceSelection`: `auto` or a specific source id (`jellyfin`,
   `youtube`, or any plugin id); an open `SourceSelection` value persisted in
   `UserDefaults` by `rawValue` (mirrors the `appPresence`/`@AppStorage` pattern
   so the menu binding reacts).
@@ -267,7 +267,7 @@ change is debuggable instead of an invisible permanent "idle".
 
 ## 10. Adding another source
 
-A third-party **loopback source** needs **no app code change** — that's the
+A third-party **loopback source** needs **no app code change**. That's the whole
 point of the ABI ([`loopback-source-abi-v1.md`](loopback-source-abi-v1.md)):
 
 1. Run a local process implementing `/health` + `/now-playing` + `/command` on a
@@ -281,7 +281,7 @@ point of the ABI ([`loopback-source-abi-v1.md`](loopback-source-abi-v1.md)):
    it appears in the menu's Source picker, labeled by the trusted manifest name.
 
 What still requires app code:
-- A **non-HTTP transport** (XPC, Unix socket, MPRIS/D-Bus) — the ABI is
+- A **non-HTTP transport** (XPC, Unix socket, MPRIS/D-Bus): the ABI is
   HTTP-loopback-only in v1, and Jellyfin stays the one privileged non-loopback
   built-in with its own transport.
 - `applyKind` has a dedicated Jellyfin arm; all loopback sources share one
@@ -292,11 +292,11 @@ without touching the Jellyfin transport.
 
 ## 11. Tests
 
-- `SourceArbiterTests` — the pure `decide` policy, `ActivationRecency`
+- `SourceArbiterTests`: the pure `decide` policy, `ActivationRecency`
   (including the **auto-advance-doesn't-steal** regression), bridge→snapshot
   mapping, artwork-scheme hardening, `Duration` conversions.
-- `PlayerStoreSourceGatingTests` — gated ingest updates presence but not state;
+- `PlayerStoreSourceGatingTests`: gated ingest updates presence but not state;
   ungated ingest writes; `applyExternalSnapshot`; gated `updateConnection`.
-- `PlayerStoreTests` (existing) — Jellyfin active-session heuristic, queue,
-  artist resolution, reconnect/error behavior — must stay green (no Jellyfin
-  regression).
+- `PlayerStoreTests` (existing): Jellyfin active-session heuristic, queue,
+  artist resolution, reconnect/error behaviour. Must stay green, no Jellyfin
+  regression.

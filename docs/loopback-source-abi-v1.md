@@ -1,4 +1,4 @@
-# Loopback PlaybackSource ABI — `loopback-source/1`
+# Loopback PlaybackSource ABI (`loopback-source/1`)
 
 Normative contract for a **third-party playback source**: any local process that
 implements this HTTP API on a loopback port becomes a source JellyBeat can
@@ -31,7 +31,7 @@ vendor-neutral and frozen. The consumer side lives in
 ## 2. Transport
 
 - **HTTP/1.1 over loopback only.** The host **MUST** be the `127.0.0.1` IP
-  literal — not `localhost`, not IPv6, not a hostname. This keeps the call
+  literal: not `localhost`, not IPv6, not a hostname. This keeps the call
   exempt from App Transport Security and makes DNS-rebinding impossible.
 - All paths live under a per-source **prefix**, default `/v1`.
 - The client uses a **2 s per-request timeout**, `waitsForConnectivity = false`,
@@ -44,7 +44,7 @@ vendor-neutral and frozen. The consumer side lives in
 ```jsonc
 {
   "abi": "loopback-source/1",      // optional in v1
-  "sourceName": "YouTube",         // optional; diagnostics only — NOT the menu label (§7)
+  "sourceName": "YouTube",         // optional; diagnostics only, NOT the menu label (§7)
   "capabilities": {
     "canPlayPause": true, "canNext": true, "canPrevious": true,
     "canSeek": true, "canSetVolume": true,
@@ -57,7 +57,7 @@ vendor-neutral and frozen. The consumer side lives in
   (`canPlayPause`/`canNext`/`canPrevious`/`canSeek`/`canSetVolume`) default
   **`true`**; `hasFavorites`/`hasQueue`/`canFocusTab` default **`false`**.
 - Capabilities are the **single source of truth** for what the running process
-  supports — the manifest deliberately cannot declare them, so it can never lie.
+  supports: the manifest deliberately cannot declare them, so it can never lie.
 - When `hasFavorites` is `true`, a loopback source's favorite affordance is a
   **"like"** (a thumbs-up, vs. Jellyfin's heart): the toggle uses `like` /
   `unlike` (§5) and the current state is the `liked` field in `now-playing` (§4).
@@ -70,15 +70,15 @@ vendor-neutral and frozen. The consumer side lives in
 ```jsonc
 {
   "active": true,                 // false ⇒ idle (see below)
-  "source": "youtube_music",      // string | null — diagnostics only
+  "source": "youtube_music",      // string | null, diagnostics only
   "state": "playing",             // "playing" | "paused" | null
-  "title": "…", "artist": "…", "album": "…",   // string | null — UNTRUSTED (§7)
+  "title": "…", "artist": "…", "album": "…",   // string | null, UNTRUSTED (§7)
   "durationSec": 240,             // number | null  (null ⇒ unknown / livestream)
   "positionSec": 30,              // number | null
   "volume": 0.8,                  // 0.0–1.0 | null
-  "itemId": "abc123",             // string | null — stable identity for this item
-  "artworkUrl": "https://…",      // string | null — UNTRUSTED; http/https only (§7)
-  "liked": false,                 // bool | null — "like" state; null/absent ⇒ false
+  "itemId": "abc123",             // string | null, stable identity for this item
+  "artworkUrl": "https://…",      // string | null, UNTRUSTED; http/https only (§7)
+  "liked": false,                 // bool | null, "like" state; null/absent ⇒ false
   "updatedAtMs": 1700000000000    // number | null
 }
 ```
@@ -103,16 +103,16 @@ Request body:
 
 | `action`     | `value`            | meaning                          |
 |--------------|--------------------|----------------------------------|
-| `toggle`     | —                  | play/pause                       |
-| `next`       | —                  | next track                       |
-| `previous`   | —                  | previous track                   |
+| `toggle`     | none               | play/pause                       |
+| `next`       | none               | next track                       |
+| `previous`   | none               | previous track                   |
 | `seek`       | seconds (number)   | seek to absolute position        |
 | `setVolume`  | 0.0–1.0 (number)   | set output volume                |
-| `focusTab`   | —                  | bring the source's window/tab to front |
-| `like`       | —                  | set the current item's "like" (favorite) |
-| `unlike`     | —                  | clear the current item's "like"          |
+| `focusTab`   | none               | bring the source's window/tab to front |
+| `like`       | none               | set the current item's "like" (favorite) |
+| `unlike`     | none               | clear the current item's "like"          |
 
-Responses (best-effort / async — the *result* is observed on the next
+Responses (best-effort / async; the *result* is observed on the next
 `now-playing` read, which is the source of truth):
 
 - `2xx` → accepted.
@@ -133,9 +133,9 @@ treated as **idle, silently**:
 `cannotConnectToHost`, `cannotFindHost`, `networkConnectionLost`,
 `notConnectedToInternet`, `timedOut`, `cancelled`.
 
-Everything else — a JSON decode failure (schema drift) or an unexpected status —
-is **logged** but still surfaced to the UI as idle, so a breaking change is
-debuggable instead of an invisible permanent "idle".
+Everything else (a JSON decode failure from schema drift, or an unexpected
+status) is **logged** but still surfaced to the UI as idle, so a breaking change
+is debuggable instead of an invisible permanent "idle".
 
 ## 7. Security & trust
 
@@ -151,15 +151,15 @@ and isn't guaranteed.
   `file://` or other-scheme value is dropped at the mapping boundary, so the
   artwork loader can never be turned into a local file read.
 - **The menu label is the *trusted* manifest `displayName`**, written to disk by
-  the user (or a plugin's installer) — **never** `/health.sourceName`, which is
-  served by the (possibly squatting) process and kept for diagnostics only.
+  the user (or a plugin's installer). It is **never** `/health.sourceName`, which
+  is served by the (possibly squatting) process and kept for diagnostics only.
 - **The loopback port is UNAUTHENTICATED.** This is an explicit, accepted
   residual risk for phase 1, bounded by design:
-  - loopback-only — no remote attacker can reach it;
-  - the app never executes code from a source, only reads now-playing and sends
-    the fixed command vocabulary above — so a hostile source can at worst show a
-    wrong/offensive now-playing card and receive transport clicks (no RCE, no
-    exfiltration);
+  - loopback-only, so no remote attacker can reach it;
+  - the app never executes code from a source, it only reads now-playing and
+    sends the fixed command vocabulary above, so a hostile source can at worst
+    show a wrong/offensive now-playing card and receive transport clicks (no RCE,
+    no exfiltration);
   - the only outbound fetch a source can cause is the scheme-restricted artwork.
 
   Any process that could abuse this already has user-level access to the machine
@@ -197,7 +197,7 @@ greppability) describing one source:
 }
 ```
 
-- **Capabilities are NOT in the manifest** — they come from `/health` at runtime
+- **Capabilities are NOT in the manifest.** They come from `/health` at runtime
   (§3), so a manifest can never overstate what the running process supports.
 - A manifest is **dropped, with a logged warning** (never a crash), if it fails
   to decode, has a malformed/duplicate `id`, collides on a `port` with an
@@ -205,10 +205,10 @@ greppability) describing one source:
   directory yields zero sources.
 - **Built-in sources** are compiled in, seeded first, and always win an `id`/
   `port` collision against a discovered manifest:
-  - **Jellyfin** — a privileged, non-loopback built-in (it keeps its own
+  - **Jellyfin:** a privileged, non-loopback built-in (it keeps its own
     WebSocket/polling transport). Its descriptor carries no port; the registry
     never builds a loopback client for it. `homeRank` 0 (the home source).
-  - **YouTube** — the first built-in *loopback* source: `id` `youtube`, port
+  - **YouTube:** the first built-in *loopback* source: `id` `youtube`, port
     `8976`, prefix `/v1`. Identical behavior to before, expressed as a
     descriptor instead of a hard-coded special case.
 
@@ -219,5 +219,5 @@ greppability) describing one source:
 3. Relaunch JellyBeat. The source appears in the menu-bar **Source** picker and
    is arbitrated automatically.
 
-No app code change is required to add a *source*. (Adding a non-HTTP *transport*
-— XPC, Unix socket, MPRIS — is a deliberate future code change.)
+No app code change is required to add a *source*. (Adding a non-HTTP *transport*,
+like XPC, Unix socket, or MPRIS, is a deliberate future code change.)
