@@ -160,15 +160,24 @@ Jellyfin + YouTube), evaluated in order:
 forced selection              → that source
 auto, exactly one playing     → that source
 auto, several playing         → most-recently-ACTIVATED (tie → tiePriority)
-auto, none playing            → first present source in homePriority
+auto, none playing, current active → keep current ("sticky pause")
+auto, none playing, current idle   → first present source in homePriority
 auto, nothing active          → keep current (last source)
 ```
 
+- **Sticky pause, not eager home-reveal.** When nothing is playing, the overlay
+  *stays* on the current source as long as it still has a (paused) session.
+  Pausing what you're using must not hand control to a source merely parked in
+  the background. Only once the current source goes fully idle (stopped / tab
+  closed) does the overlay defer to `homePriority`. So *pausing* YouTube keeps
+  YouTube (even with a long-paused Jellyfin session lingering), while *stopping*
+  it still surfaces the parked Jellyfin.
 - **Two explicit priority lists, not one.** `homePriority` (`[.jellyfin,
-  .youtube]`) picks the fallback when nothing is playing, so pausing YouTube
-  reveals Jellyfin, the "home" source. `tiePriority` (`[.youtube, .jellyfin]`)
-  breaks an equal-rank both-playing tie in YouTube's favor. The two answers
-  genuinely differ, so they're separate orderings, not derived from one list.
+  .youtube]`) picks the fallback when the current source has gone idle and others
+  are still parked: Jellyfin, the "home" source, first. `tiePriority`
+  (`[.youtube, .jellyfin]`) breaks an equal-rank both-playing tie in YouTube's
+  favor. The two answers genuinely differ, so they're separate orderings, not
+  derived from one list.
 - **Most-recently-activated, not -changed.** Recency is bumped only on a
   source's **idle→active edge** (the user *starting* it), tracked by the pure,
   N-source `ActivationRecency` (a monotonic-tick rank per `SourceKind`). A source
@@ -200,6 +209,11 @@ feeds keep running** and the arbiter gates *writes*:
 **Flip+write atomicity:** `ingest` calls `onJellyfinUpdate()` *before* its gate
 check, so the very poll that detects Jellyfin starting both flips the arbiter
 (`jellyfinIsActiveSource = true`) and writes the snapshot in one main-actor pass.
+The mirror direction is atomic too: a Jellyfin tick that *flips onto* a loopback
+source (e.g. Jellyfin stops and a parked YouTube is revealed) publishes that
+source's snapshot on the same pass (`publish = didFlip`), so the overlay cover,
+the menu's `activeKind`, and the command sink all land on YouTube together,
+rather than the cover lagging by one poll.
 
 ## 6. `PlayerStore`: the single source of truth
 

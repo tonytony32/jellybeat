@@ -66,10 +66,11 @@ struct SourceArbiterTests {
         )
     }
 
-    /// The pre-generalization decision policy, reproduced verbatim as an
-    /// independent oracle so `decideGeneralizedMatchesLegacy` can prove the new
-    /// generalized core is a faithful two-source projection of the old one.
-    private static func legacyDecide(
+    /// The decision policy hand-written as a flat two-source spec, kept as an
+    /// independent oracle so `decideMatchesReferencePolicy` can prove the generalized
+    /// N-source core is a faithful two-source projection of it. Mirrors the current
+    /// policy, including the "sticky pause" none-playing rule.
+    private static func referenceDecide(
         selection: SourceSelection,
         ytPlaying: Bool, ytActive: Bool,
         jfPlaying: Bool, jfActive: Bool,
@@ -80,7 +81,11 @@ struct SourceArbiterTests {
         if ytPlaying && !jfPlaying { return .youtube }
         if jfPlaying && !ytPlaying { return .jellyfin }
         if ytPlaying && jfPlaying { return ytActivatedNoOlderThanJf ? .youtube : .jellyfin }
-        if jfActive { return .jellyfin }
+        // None playing — "sticky pause": keep the current source while it still has
+        // a session; only a fully-idle current source defers to the home order.
+        let currentActive = (current == .youtube) ? ytActive : jfActive
+        if currentActive { return current }
+        if jfActive { return .jellyfin }   // home fallback (Jellyfin first)
         if ytActive { return .youtube }
         return current
     }
@@ -173,47 +178,69 @@ struct SourceArbiterTests {
         #expect(autoDecide(none, current: .jellyfin) == .jellyfin)
     }
 
-    /// Neither source playing → fall back to Jellyfin (the home source) when it
-    /// has a session, so pausing/stopping YouTube reveals Jellyfin instead of
-    /// lingering on a paused YouTube. With no Jellyfin session, a paused YouTube
-    /// keeps the overlay.
+    /// "Sticky pause": with nothing playing, the overlay stays on the current
+    /// source while it still has a (paused) session — pausing what you're using
+    /// must not hand control to a source merely parked in the background. This is
+    /// THE fix for "pause YouTube while a long-paused Jellyfin session lingers →
+    /// the Jellyfin cover hijacks the overlay".
     @Test
-    func autoFallsBackToJellyfinWhenNeitherPlaying() {
-        // Both paused → home (Jellyfin) wins even though YouTube activated later.
-        #expect(autoDecide(
-            presence(yt: SourcePresence(active: true, playing: false),
-                     jf: SourcePresence(active: true, playing: false)),
-            recency: recency(ytNoOlderThanJf: true),
-            current: .youtube
-        ) == .jellyfin)
-
-        // YouTube paused, no Jellyfin session → YouTube holds the overlay.
-        #expect(autoDecide(
-            presence(yt: SourcePresence(active: true, playing: false),
-                     jf: SourcePresence(active: false, playing: false)),
-            recency: recency(ytNoOlderThanJf: true),
-            current: .youtube
-        ) == .youtube)
-    }
-
-    /// The neither-playing "home" fallback is data, not hardcoded: flipping
-    /// `homePriority` flips which present-but-idle source the overlay reveals.
-    @Test
-    func homePriorityIsConfigurable() {
+    func autoStaysOnPausedCurrentSource() {
         let bothPaused = presence(
             yt: SourcePresence(active: true, playing: false),
             jf: SourcePresence(active: true, playing: false)
         )
-        #expect(SourceArbiter.decide(
-            selection: .auto, presence: bothPaused, recency: ActivationRecency(),
-            homePriority: [.jellyfin, .youtube], tiePriority: tiePriority,
+        // Pausing YouTube keeps YouTube even though Jellyfin is parked (paused) and
+        // would win the static home order.
+        #expect(autoDecide(bothPaused, recency: recency(ytNoOlderThanJf: true), current: .youtube) == .youtube)
+        // Symmetrically, pausing Jellyfin keeps Jellyfin.
+        #expect(autoDecide(bothPaused, recency: recency(ytNoOlderThanJf: false), current: .jellyfin) == .jellyfin)
+    }
+
+    /// Only once the current source goes fully idle (stopped / tab closed) does the
+    /// overlay defer to the home fallback — so *stopping* the active source still
+    /// surfaces a parked source, while merely *pausing* it does not.
+    @Test
+    func autoRevealsHomeWhenCurrentSourceStops() {
+        // YouTube was current but is now idle; Jellyfin parked (paused) → Jellyfin.
+        #expect(autoDecide(
+            presence(yt: SourcePresence(active: false, playing: false),
+                     jf: SourcePresence(active: true, playing: false)),
             current: .youtube
         ) == .jellyfin)
-        #expect(SourceArbiter.decide(
-            selection: .auto, presence: bothPaused, recency: ActivationRecency(),
-            homePriority: [.youtube, .jellyfin], tiePriority: tiePriority,
-            current: .youtube
+        // Jellyfin was current but is now idle; YouTube parked (paused) → YouTube.
+        #expect(autoDecide(
+            presence(yt: SourcePresence(active: true, playing: false),
+                     jf: SourcePresence(active: false, playing: false)),
+            current: .jellyfin
         ) == .youtube)
+    }
+
+    /// The neither-playing "home" fallback is data, not hardcoded: when the current
+    /// source is idle and several *other* sources are parked (paused), flipping
+    /// `homePriority` flips which one the overlay reveals. (Needs a third source:
+    /// under the sticky rule two parked built-ins never both lose to the order —
+    /// the current one is always kept; only a fully-idle current source defers to
+    /// `homePriority`.)
+    @Test
+    func homePriorityIsConfigurable() {
+        let spotify = SourceID(rawValue: "com.example.spotify")
+        // Current source (Jellyfin) is idle; YouTube and the third source are both
+        // parked, so the home order alone decides which is revealed.
+        let parked: [SourceKind: SourcePresence] = [
+            .jellyfin: SourcePresence(active: false, playing: false),
+            .youtube: SourcePresence(active: true, playing: false),
+            spotify: SourcePresence(active: true, playing: false),
+        ]
+        #expect(SourceArbiter.decide(
+            selection: .auto, presence: parked, recency: ActivationRecency(),
+            homePriority: [.jellyfin, .youtube, spotify], tiePriority: tiePriority,
+            current: .jellyfin
+        ) == .youtube)
+        #expect(SourceArbiter.decide(
+            selection: .auto, presence: parked, recency: ActivationRecency(),
+            homePriority: [.jellyfin, spotify, .youtube], tiePriority: tiePriority,
+            current: .jellyfin
+        ) == spotify)
     }
 
     /// The both-playing tie direction is data too: with equal activation rank
@@ -237,14 +264,14 @@ struct SourceArbiterTests {
         ) == .jellyfin)
     }
 
-    /// The generalized `decide` is a faithful two-source projection of the
-    /// pre-generalization policy: across the grid of (active/playing) states ×
-    /// tie direction × current source — all with *unequal* activation ranks — it
-    /// agrees with the legacy oracle. The equal-rank tie (where the deliberate
+    /// The generalized `decide` is a faithful two-source projection of the flat
+    /// reference policy: across the grid of (active/playing) states × tie direction
+    /// × current source — all with *unequal* activation ranks — it agrees with the
+    /// independent `referenceDecide` oracle. The equal-rank tie (where the deliberate
     /// same-pass divergence lives) is pinned separately by `tiePriorityIsConfigurable`
     /// and `samePassDoubleActivationFavorsYouTube`.
     @Test
-    func decideGeneralizedMatchesLegacy() {
+    func decideMatchesReferencePolicy() {
         let bools = [false, true]
         for ytActive in bools {
             for ytPlaying in bools where !(ytPlaying && !ytActive) {
@@ -258,7 +285,7 @@ struct SourceArbiterTests {
                                         jf: SourcePresence(active: jfActive, playing: jfPlaying)),
                                     recency: recency(ytNoOlderThanJf: ytNewer),
                                     current: current)
-                                let want = Self.legacyDecide(
+                                let want = Self.referenceDecide(
                                     selection: .auto,
                                     ytPlaying: ytPlaying, ytActive: ytActive,
                                     jfPlaying: jfPlaying, jfActive: jfActive,
