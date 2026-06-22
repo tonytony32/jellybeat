@@ -81,6 +81,7 @@ final class OverlayWindowController: NSObject {
         watchThemeForWindowResize()
         watchAppearanceSettings()
         watchPlayerForAmbientMode()
+        watchMinimHover()
         watchQueuePanel()
         watchQueuePanelSize()
     }
@@ -247,10 +248,26 @@ final class OverlayWindowController: NSObject {
         // window size to themes.current.layout.windowSize.
         let watcher: @MainActor () -> Void = { [weak self] in
             guard let self else { return }
+            // Drop Minim hover when leaving the theme so a stale flag doesn't
+            // cause the window to open in expanded state on re-entry.
+            if self.themes.current.id != "minim" {
+                self.player.minimHovered = false
+            }
             self.applyWindowSizeForCurrentState()
             self.scheduleThemeReevaluation()
         }
         watcher()
+    }
+
+    private func watchMinimHover() {
+        withObservationTracking {
+            _ = player.minimHovered
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.applyWindowSizeForCurrentState()
+                self?.watchMinimHover()
+            }
+        }
     }
 
     private func scheduleThemeReevaluation() {
@@ -325,6 +342,8 @@ final class OverlayWindowController: NSObject {
         let nextSize: CGSize
         if targetAmbient, let art = theme.artworkFrame {
             nextSize = art.size
+        } else if theme.id == "minim" && player.minimHovered {
+            nextSize = CGSize(width: theme.layout.windowSize.width, height: MinimTheme.expandedHeight)
         } else {
             nextSize = theme.layout.windowSize
         }
@@ -332,7 +351,26 @@ final class OverlayWindowController: NSObject {
         // Decide next origin.
         var nextOrigin: CGPoint
         let snap = currentSnapEdges(window: window)
-        if snap.isSnapped,
+        if theme.id == "minim" && !targetAmbient {
+            // Determine grow direction: bars in the bottom half of the screen
+            // expand upward (anchor bottom edge); bars in the top half expand
+            // downward (anchor top edge) so the info section never runs off-screen.
+            let growsUpward: Bool
+            if let screen = window.screen ?? NSScreen.main {
+                let area = snapFrame(for: screen)
+                growsUpward = window.frame.midY <= (area.minY + area.maxY) / 2
+            } else {
+                growsUpward = true
+            }
+            player.minimGrowsUpward = growsUpward
+            let x = window.frame.midX - nextSize.width / 2
+            nextOrigin = CGPoint(
+                x: x,
+                y: growsUpward
+                    ? window.frame.minY                        // bottom-anchor
+                    : window.frame.maxY - nextSize.height      // top-anchor
+            )
+        } else if snap.isSnapped,
            let screen = window.screen ?? NSScreen.main {
             // Preserve the snapped edge(s) across resizes — including plain
             // edge snaps (e.g. bottom-centred), not just the four corners.
