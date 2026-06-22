@@ -62,13 +62,19 @@ private struct MinimBody: View {
             // the collapsed strip can never show the wrong slice. The window
             // resize (controller) and this content change share the same 0.16s
             // ease-out so they move together — that sync is what removes the jerk.
-            if store.minimHovered {
-                infoSection
-                    .transition(.opacity)
+            //
+            // The strip pins to the anchored edge and the info unfolds away from
+            // it: upward (info above the strip) normally, downward (info below)
+            // when the strip is parked against the menu bar.
+            if store.minimGrowsUpward {
+                if store.minimHovered { infoSection.transition(.opacity) }
+                compactBar
+            } else {
+                compactBar
+                if store.minimHovered { infoSection.transition(.opacity) }
             }
-            compactBar
         }
-        .frame(maxHeight: .infinity, alignment: .bottom)
+        .frame(maxHeight: .infinity, alignment: store.minimGrowsUpward ? .bottom : .top)
         .animation(.easeOut(duration: 0.16), value: store.minimHovered)
     }
 

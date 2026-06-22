@@ -310,14 +310,24 @@ final class OverlayWindowController: NSObject {
     /// there's no race against the in-flight resize.
     private func updateMinimHoverFromMouse() {
         guard let window = overlayWindow, themes.current.id == "minim" else { return }
+        // While dragging, force not-hovered so the strip stays collapsed and the
+        // user repositions the compact strip (not the expanded card).
         let frame = window.frame
+        // Hover zone = the strip's footprint plus the space it unfolds into,
+        // anchored at the pinned edge. `minY` is the strip bottom when growing
+        // up; when growing down the strip is at the top, so the zone hangs from
+        // the strip's top edge. Either way it covers exactly the expanded frame,
+        // so moving between strip and revealed info never thrashes the state.
+        let zoneBottom = player.minimGrowsUpward
+            ? frame.minY
+            : frame.maxY - MinimTheme.expandedHeight
         let zone = CGRect(
             x: frame.minX,
-            y: frame.minY,
+            y: zoneBottom,
             width: frame.width,
             height: MinimTheme.expandedHeight
         )
-        let inside = zone.contains(NSEvent.mouseLocation)
+        let inside = !isUserDragging && zone.contains(NSEvent.mouseLocation)
         if player.minimHovered != inside {
             player.minimHovered = inside
         }
@@ -380,11 +390,12 @@ final class OverlayWindowController: NSObject {
     ///    falls back to centring at the previous window centre.
     private func applyWindowSizeForCurrentState() {
         guard let window = overlayWindow else { return }
-        // Never reposition while the user is dragging — a background poll
-        // firing mid-drag would yank the window out from under the cursor.
-        guard !isUserDragging else { return }
         let theme = themes.current
         let targetAmbient = isInAmbientMode && theme.artworkFrame != nil
+        // Never reposition while the user is dragging — a background poll firing
+        // mid-drag would yank the window out from under the cursor (and fight
+        // AppKit's own drag tracking).
+        guard !isUserDragging else { return }
 
         // The window's own drop-shadow looks like a frame around the cover
         // when the theme has no glass background (Aero). Suppress it there
@@ -405,13 +416,31 @@ final class OverlayWindowController: NSObject {
         var nextOrigin: CGPoint
         let snap = currentSnapEdges(window: window)
         if theme.id == "minim" && !targetAmbient {
-            // Minim always unfolds upward: pin the current bottom-left corner so
-            // the strip never moves — the info section grows into the space above
-            // it on hover and collapses back cleanly. The width is constant
-            // (collapsed and expanded are both `windowSize.width`), so keeping
-            // minX/minY keeps both the bottom edge and the horizontal position
-            // exactly where the user left them.
-            nextOrigin = CGPoint(x: window.frame.minX, y: window.frame.minY)
+            // The strip's rect must never move on hover — only the space it
+            // unfolds into is added. Recover the strip's resting bottom edge from
+            // the current frame using the active grow direction (its anchored
+            // edge is stable across the collapse/expand cycle).
+            let stripBottom = player.minimGrowsUpward
+                ? window.frame.minY
+                : window.frame.maxY - MinimTheme.barHeight
+            // Unfold upward by default; unfold downward only when the expanded
+            // height wouldn't fit above the strip — i.e. it's parked near the top
+            // (against the menu bar). Decided from the resting position, so it
+            // only flips when the strip is actually moved, never mid-hover.
+            if let screen = window.screen ?? NSScreen.main {
+                let area = snapFrame(for: screen)
+                player.minimGrowsUpward =
+                    stripBottom + MinimTheme.expandedHeight <= area.maxY
+            }
+            let x = window.frame.minX
+            if player.minimHovered && player.minimGrowsUpward {
+                nextOrigin = CGPoint(x: x, y: stripBottom)                  // grow up: bottom pinned
+            } else if player.minimHovered {
+                // grow down: top pinned at the strip's top edge
+                nextOrigin = CGPoint(x: x, y: stripBottom + MinimTheme.barHeight - MinimTheme.expandedHeight)
+            } else {
+                nextOrigin = CGPoint(x: x, y: stripBottom)                  // collapsed: the strip itself
+            }
         } else if snap.isSnapped,
            let screen = window.screen ?? NSScreen.main {
             // Preserve the snapped edge(s) across resizes — including plain
@@ -650,7 +679,24 @@ extension OverlayWindowController: NSWindowDelegate {
         // debounce the snap so it runs once movement stops (i.e. on release),
         // never mid-drag. Close the queue panel so it doesn't trail the drag.
         player.isQueuePopoverOpen = false
+        let startingDrag = !isUserDragging
         isUserDragging = true
+        // At the start of a Minim drag, collapse to the compact strip so the
+        // user repositions the strip itself — and can snap it flush against the
+        // menu bar — rather than the tall expanded card. Keep the strip's edge
+        // pinned (so it doesn't jump) and skip the synchronous redisplay so this
+        // doesn't fight AppKit's in-progress drag.
+        if startingDrag, themes.current.id == "minim", player.minimHovered {
+            let f = window.frame
+            let stripBottom = player.minimGrowsUpward ? f.minY : f.maxY - MinimTheme.barHeight
+            player.minimHovered = false
+            suppressMoveCallback = true
+            window.setFrame(
+                NSRect(x: f.minX, y: stripBottom, width: f.width, height: MinimTheme.barHeight),
+                display: false
+            )
+            suppressMoveCallback = false
+        }
         dragSettleTask?.cancel()
         dragSettleTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 200_000_000)
@@ -666,6 +712,13 @@ extension OverlayWindowController: NSWindowDelegate {
         guard let window = overlayWindow else { return }
         snapToEdgesIfClose(window)
         refreshSnapState()
+        // Re-decide the Minim unfold direction from where the strip came to rest:
+        // downward when it's parked near the top (no room above for the info).
+        if themes.current.id == "minim", let screen = window.screen {
+            let area = snapFrame(for: screen)
+            player.minimGrowsUpward =
+                window.frame.minY + MinimTheme.expandedHeight <= area.maxY
+        }
         if let screen = window.screen,
            let displayID = Self.displayID(of: screen) {
             settings.setOverlayPosition(window.frame.origin, forDisplay: displayID)

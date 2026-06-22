@@ -112,11 +112,16 @@ final class PlayerStore {
     /// suppressed in that state so the wheel scrolls the queue list instead of
     /// fighting it.
     var isQueuePopoverOpen: Bool = false
-    /// True while the cursor is inside the Minim overlay. Driven by an AppKit
-    /// tracking area on the hosting view (robust across the window's
-    /// hover-resize, unlike SwiftUI `.onHover`) and observed by
-    /// `OverlayWindowController` to expand the strip upward on hover.
+    /// True while the cursor is inside the Minim overlay. Driven by a cursor
+    /// poll timer in `OverlayWindowController` (robust across the window's
+    /// hover-resize and regardless of which app is active) and observed there
+    /// to expand the strip on hover.
     var minimHovered: Bool = false
+    /// Direction the Minim strip unfolds on hover. Upward (info above the strip)
+    /// by default; downward (info below) when the strip is parked near the top
+    /// of the screen and the expanded height wouldn't fit above it. Set by
+    /// `OverlayWindowController`; read by `MinimTheme` to order the layout.
+    var minimGrowsUpward: Bool = true
 
     // MARK: - Wired in by AppDelegate
 
