@@ -310,24 +310,17 @@ final class OverlayWindowController: NSObject {
     /// there's no race against the in-flight resize.
     private func updateMinimHoverFromMouse() {
         guard let window = overlayWindow, themes.current.id == "minim" else { return }
-        // While dragging, force not-hovered so the strip stays collapsed and the
-        // user repositions the compact strip (not the expanded card).
-        let frame = window.frame
-        // Hover zone = the strip's footprint plus the space it unfolds into,
-        // anchored at the pinned edge. `minY` is the strip bottom when growing
-        // up; when growing down the strip is at the top, so the zone hangs from
-        // the strip's top edge. Either way it covers exactly the expanded frame,
-        // so moving between strip and revealed info never thrashes the state.
-        let zoneBottom = player.minimGrowsUpward
-            ? frame.minY
-            : frame.maxY - MinimTheme.expandedHeight
-        let zone = CGRect(
-            x: frame.minX,
-            y: zoneBottom,
-            width: frame.width,
-            height: MinimTheme.expandedHeight
-        )
-        let inside = !isUserDragging && zone.contains(NSEvent.mouseLocation)
+        // Use the live window rect as the hover zone, which gives natural
+        // hysteresis and can't oscillate:
+        //  - Collapsed, the rect is just the strip, so it only expands when the
+        //    cursor is actually over the strip — never over the empty space the
+        //    info would unfold into (the old expanded-height zone did, which made
+        //    it flip open/closed unpredictably).
+        //  - Expanded, the rect is the whole card, so it stays open until the
+        //    cursor leaves all of it.
+        // Expand-zone ⊂ stay-zone, so there's no boundary where it flickers.
+        // Forced off while dragging so the strip stays collapsed during a move.
+        let inside = !isUserDragging && window.frame.contains(NSEvent.mouseLocation)
         if player.minimHovered != inside {
             player.minimHovered = inside
         }
