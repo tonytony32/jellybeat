@@ -81,6 +81,7 @@ final class OverlayWindowController: NSObject {
         watchThemeForWindowResize()
         watchAppearanceSettings()
         watchPlayerForAmbientMode()
+        watchMinimHover()
         watchQueuePanel()
         watchQueuePanelSize()
     }
@@ -247,10 +248,26 @@ final class OverlayWindowController: NSObject {
         // window size to themes.current.layout.windowSize.
         let watcher: @MainActor () -> Void = { [weak self] in
             guard let self else { return }
+            // Drop Minim hover when leaving the theme so a stale flag doesn't
+            // cause the window to open in expanded state on re-entry.
+            if self.themes.current.id != "minim" {
+                self.player.minimHovered = false
+            }
             self.applyWindowSizeForCurrentState()
             self.scheduleThemeReevaluation()
         }
         watcher()
+    }
+
+    private func watchMinimHover() {
+        withObservationTracking {
+            _ = player.minimHovered
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.applyWindowSizeForCurrentState()
+                self?.watchMinimHover()
+            }
+        }
     }
 
     private func scheduleThemeReevaluation() {
@@ -325,6 +342,8 @@ final class OverlayWindowController: NSObject {
         let nextSize: CGSize
         if targetAmbient, let art = theme.artworkFrame {
             nextSize = art.size
+        } else if theme.id == "minim" && player.minimHovered {
+            nextSize = CGSize(width: theme.layout.windowSize.width, height: MinimTheme.expandedHeight)
         } else {
             nextSize = theme.layout.windowSize
         }
@@ -332,7 +351,16 @@ final class OverlayWindowController: NSObject {
         // Decide next origin.
         var nextOrigin: CGPoint
         let snap = currentSnapEdges(window: window)
-        if snap.isSnapped,
+        if theme.id == "minim" && !targetAmbient {
+            // Minim: always anchor to the window's current bottom edge so the
+            // compact bar stays on screen while the info section grows upward
+            // on hover (and collapses cleanly on leave). Horizontal position
+            // is kept centred; the clamping pass below handles screen bounds.
+            nextOrigin = CGPoint(
+                x: window.frame.midX - nextSize.width / 2,
+                y: window.frame.minY
+            )
+        } else if snap.isSnapped,
            let screen = window.screen ?? NSScreen.main {
             // Preserve the snapped edge(s) across resizes — including plain
             // edge snaps (e.g. bottom-centred), not just the four corners.

@@ -1,25 +1,29 @@
 import AppKit
 import SwiftUI
 
-/// No artwork. A single line of `title • artist` on the left, controls on the
-/// right. Tooltip-style glass. Smallest footprint of any built-in.
+/// Compact now-playing pill. Default: album art + transport controls in a
+/// slim 360 × 56 bar. Hover: the bar grows upward to reveal title, artist,
+/// and a seekable progress bar above it.
 struct MinimTheme: OverlayTheme {
     nonisolated let id = "minim"
     nonisolated let displayName = "Minim"
     nonisolated let author = "Built-in"
 
+    /// Height of the fully expanded (hovering) window.
+    nonisolated static let expandedHeight: CGFloat = 128
+
     nonisolated let layout = LayoutSpec(
         orientation: .minimal,
         artworkSize: nil,
         controlsPosition: .beside,
-        windowSize: CGSize(width: 360, height: 80),
-        padding: 12,
+        windowSize: CGSize(width: 360, height: 56),
+        padding: 10,
         cornerRadius: 14
     )
 
     nonisolated let typography = TypographySpec(
         title: .init(font: .callout, weight: .semibold, opacity: 1.0),
-        artist: .init(font: .callout, weight: .regular, opacity: 0.7),
+        artist: .init(font: .caption, weight: .regular, opacity: 0.7),
         album: .init(font: .caption, weight: .regular, opacity: 0.55),
         showAlbum: false
     )
@@ -43,12 +47,14 @@ private struct MinimBody: View {
     let theme: MinimTheme
 
     var body: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 1) {
+        VStack(spacing: 0) {
+            // Info section — occupies the space revealed as the window grows
+            // upward on hover. SwiftUI gives it 0 pt when the window is compact
+            // so it is invisible until the window expands.
+            VStack(alignment: .leading, spacing: 3) {
                 Text(track.title)
                     .font(theme.typography.title.font)
                     .fontWeight(theme.typography.title.weight)
-                    .opacity(theme.typography.title.opacity)
                     .lineLimit(1)
                     .truncationMode(.tail)
 
@@ -58,30 +64,81 @@ private struct MinimBody: View {
                     .opacity(theme.typography.artist.opacity)
                     .lineLimit(1)
                     .truncationMode(.tail)
+
+                HStack(spacing: 6) {
+                    Text(formattedTime(track.position))
+                        .font(.caption2)
+                        .monospacedDigit()
+                        .opacity(0.5)
+
+                    ProgressBarView(
+                        trackKey: track.itemId,
+                        position: track.position,
+                        runtime: track.runtime,
+                        isPaused: store.isPaused,
+                        onSeek: { seconds in
+                            Task { @MainActor in await store.seek(toSeconds: seconds) }
+                        }
+                    )
+
+                    Text(formattedTime(track.runtime))
+                        .font(.caption2)
+                        .monospacedDigit()
+                        .opacity(0.5)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+            .padding(.bottom, 6)
 
-            ControlsView(
-                isPaused: store.isPaused,
-                isCommandInFlight: store.isCommandInFlight,
-                behavior: theme.behavior,
-                isVisible: true,
-                flashedAction: store.commandFeedback,
-                action: { action in
-                    Task { @MainActor in
-                        switch action {
-                        case .previous: await store.previousTrack()
-                        case .playPause: await store.playPause()
-                        case .next: await store.nextTrack()
+            // Compact bar — always visible, pinned to the bottom of the window.
+            HStack(spacing: 10) {
+                ArtworkView(
+                    itemId: track.artworkItemId,
+                    imageTag: track.imageTag,
+                    size: 36,
+                    cornerRadius: 6,
+                    shadowOpacity: 0,
+                    artworkURL: track.artworkURL,
+                    canFocusTab: store.capabilities.canFocusTab,
+                    onFocus: { Task { @MainActor in await store.focusSource() } }
+                )
+
+                Spacer()
+
+                ControlsView(
+                    isPaused: store.isPaused,
+                    isCommandInFlight: store.isCommandInFlight,
+                    behavior: theme.behavior,
+                    isVisible: true,
+                    flashedAction: store.commandFeedback,
+                    action: { action in
+                        Task { @MainActor in
+                            switch action {
+                            case .previous: await store.previousTrack()
+                            case .playPause: await store.playPause()
+                            case .next: await store.nextTrack()
+                            }
                         }
+                    },
+                    isFavorite: track.isFavorite,
+                    onToggleFavorite: {
+                        Task { @MainActor in await store.toggleFavorite() }
                     }
-                },
-                isFavorite: track.isFavorite,
-                onToggleFavorite: {
-                    Task { @MainActor in await store.toggleFavorite() }
-                }
-            )
+                )
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(height: 56)
         }
-        .padding(theme.layout.padding)
+        .onHover { store.minimHovered = $0 }
+    }
+
+    private func formattedTime(_ duration: Duration) -> String {
+        let totalSeconds = max(0, duration.components.seconds)
+        let minutes = totalSeconds / 60
+        let seconds = totalSeconds % 60
+        return String(format: "%d:%02d", minutes, seconds)
     }
 }

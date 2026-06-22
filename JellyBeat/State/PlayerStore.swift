@@ -112,6 +112,9 @@ final class PlayerStore {
     /// suppressed in that state so the wheel scrolls the queue list instead of
     /// fighting it.
     var isQueuePopoverOpen: Bool = false
+    /// True while the cursor is inside the Minim overlay. Observed by
+    /// `OverlayWindowController` to expand the window upward on hover.
+    var minimHovered: Bool = false
 
     // MARK: - Wired in by AppDelegate
 
