@@ -22,6 +22,13 @@ struct ControlsView: View {
     let isFavorite: Bool
     /// Toggles the favorite flag on the current track.
     let onToggleFavorite: @MainActor () -> Void
+    /// Per-instance visibility of each control cluster. Defaulting to `true`
+    /// preserves the single-row layout used by Standard / Classic / Aero;
+    /// Minim sets these to split transport (compact bar) from favorite/queue
+    /// (revealed on hover) across two separate `ControlsView` instances.
+    var showsTransport: Bool = true
+    var showsFavorite: Bool = true
+    var showsQueue: Bool = true
     /// Drives the queue side panel: the list button toggles
     /// `isQueuePopoverOpen`, and `OverlayWindowController` shows/positions the
     /// panel window in response (also suspends scroll-to-volume while open).
@@ -40,19 +47,22 @@ struct ControlsView: View {
         // (see `overlayHitTarget`); the boxes sit edge-to-edge so the whole
         // row is contiguously tappable while the glyphs stay where they were.
         HStack(spacing: 0) {
-            controlButton(systemName: "backward.fill", action: .previous)
-            controlButton(
-                systemName: isPaused ? "play.fill" : "pause.fill",
-                action: .playPause,
-                emphasised: true
-            )
-            controlButton(systemName: "forward.fill", action: .next)
+            if showsTransport {
+                controlButton(systemName: "backward.fill", action: .previous)
+                controlButton(
+                    systemName: isPaused ? "play.fill" : "pause.fill",
+                    action: .playPause,
+                    emphasised: true
+                )
+                controlButton(systemName: "forward.fill", action: .next)
+            }
             // Capability-gated: hidden for sources without favorites / a queue
-            // (e.g. the YouTube bridge), shown for Jellyfin.
-            if player.capabilities.hasFavorites {
+            // (e.g. the YouTube bridge), shown for Jellyfin. The `shows*` flags
+            // let a theme suppress a cluster even when the source supports it.
+            if showsFavorite && player.capabilities.hasFavorites {
                 favoriteButton
             }
-            if player.capabilities.hasQueue {
+            if showsQueue && player.capabilities.hasQueue {
                 queueButton
             }
         }
