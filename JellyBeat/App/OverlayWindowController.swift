@@ -165,6 +165,20 @@ final class OverlayWindowController: NSObject {
             player?.nudgeVolume(by: delta)
         }
         window.contentView = hosting
+        // Round the corners at the CALayer level, not just via SwiftUI's
+        // `.clipShape`. The SwiftUI clip lags an animated `setFrame` by a frame,
+        // so the back-most hit surface painted square corners at the very start
+        // of the Minim hover-unfold. A layer mask is part of the same layer
+        // AppKit animates, so it resizes in lockstep — no square flash. Only the
+        // glass themes (the rounded card *is* the window) get clipped; Aero /
+        // Classic float with no glass and rely on their content's own shadows
+        // spilling past the bounds, which `masksToBounds` would crop.
+        hosting.wantsLayer = true
+        if themes.current.behavior.hasGlassBackground {
+            hosting.layer?.cornerRadius = themes.current.layout.cornerRadius
+            hosting.layer?.cornerCurve = .continuous
+            hosting.layer?.masksToBounds = true
+        }
 
         window.center()
         window.makeKeyAndOrderFront(nil)
@@ -394,6 +408,20 @@ final class OverlayWindowController: NSObject {
         // when the theme has no glass background (Aero). Suppress it there
         // and let the artwork's own shadow do the work.
         window.hasShadow = theme.behavior.hasGlassBackground
+
+        // Keep the content-layer corner mask in sync with the active theme (see
+        // createWindow). Glass themes clip to their rounded card; the floating
+        // themes turn it off so their content shadows aren't cropped.
+        if let layer = window.contentView?.layer {
+            if theme.behavior.hasGlassBackground {
+                layer.cornerRadius = theme.layout.cornerRadius
+                layer.cornerCurve = .continuous
+                layer.masksToBounds = true
+            } else {
+                layer.cornerRadius = 0
+                layer.masksToBounds = false
+            }
+        }
 
         // Decide next size.
         let nextSize: CGSize
