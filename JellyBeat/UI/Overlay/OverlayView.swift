@@ -60,8 +60,11 @@ struct OverlayView: View {
             // nudge this up slightly.
             Color.black.opacity(0.005)
             if themes.current.behavior.hasGlassBackground {
-                GlassBackground(material: themes.current.behavior.glassMaterial)
-                    .opacity(chromeOpacity)
+                GlassBackground(
+                    material: themes.current.behavior.glassMaterial,
+                    cornerRadius: themes.current.layout.cornerRadius
+                )
+                .opacity(chromeOpacity)
             }
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -72,6 +75,12 @@ struct OverlayView: View {
             VolumeFeedbackView(level: player.volumeFeedback)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .allowsHitTesting(false)
+                // Scoped to the HUD itself, NOT the whole ZStack. On the outer
+                // chain it wrapped every theme's body — including the Minim
+                // collapse — in a 0.15s transaction whenever the volume HUD
+                // faded (~1s after a scroll), fighting the 0.16s window/content
+                // unfold animation and making the strip's collapse look broken.
+                .animation(.easeInOut(duration: 0.15), value: player.volumeFeedback)
         }
         .clipShape(
             RoundedRectangle(
@@ -80,7 +89,6 @@ struct OverlayView: View {
             )
         )
         .animation(.easeInOut(duration: 0.25), value: player.transientMessage)
-        .animation(.easeInOut(duration: 0.15), value: player.volumeFeedback)
         .animation(.easeInOut(duration: 0.25), value: ambientHover)
         .animation(.spring(response: 0.25, dampingFraction: 0.7), value: player.commandFeedback)
     }

@@ -112,12 +112,15 @@ final class PlayerStore {
     /// suppressed in that state so the wheel scrolls the queue list instead of
     /// fighting it.
     var isQueuePopoverOpen: Bool = false
-    /// True while the cursor is inside the Minim overlay. Observed by
-    /// `OverlayWindowController` to expand the window on hover.
+    /// True while the cursor is inside the Minim overlay. Driven by a cursor
+    /// poll timer in `OverlayWindowController` (robust across the window's
+    /// hover-resize and regardless of which app is active) and observed there
+    /// to expand the strip on hover.
     var minimHovered: Bool = false
-    /// Set by `OverlayWindowController` each time the Minim window resizes.
-    /// True → window grows upward (bar in bottom half of screen);
-    /// false → window grows downward (bar in top half of screen).
+    /// Direction the Minim strip unfolds on hover. Upward (info above the strip)
+    /// by default; downward (info below) when the strip is parked near the top
+    /// of the screen and the expanded height wouldn't fit above it. Set by
+    /// `OverlayWindowController`; read by `MinimTheme` to order the layout.
     var minimGrowsUpward: Bool = true
 
     // MARK: - Wired in by AppDelegate
@@ -799,6 +802,20 @@ final class PlayerStore {
         guard newValue != volume else { return }
         volume = newValue
         scheduleVolumeSend(to: newValue)
+    }
+
+    /// Set the volume to an absolute level (0–100) and push it to the source.
+    /// Unlike `nudgeVolume`, this is NOT suppressed while the queue popover is
+    /// open: it backs an explicit on-screen control (the Minim mute button),
+    /// not the scroll wheel that the open queue list needs to scroll instead.
+    func setVolume(toPercent value: Int) {
+        guard currentTrack != nil else { return }
+        let clamped = min(100, max(0, value))
+        lastVolumeCommandAt = Date()
+        flashVolume(clamped)
+        guard clamped != volume else { return }
+        volume = clamped
+        scheduleVolumeSend(to: clamped)
     }
 
     /// Throttled `SetVolume` dispatch. Fires immediately on the first tick of a

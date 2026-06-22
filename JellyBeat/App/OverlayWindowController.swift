@@ -51,6 +51,9 @@ final class OverlayWindowController: NSObject {
     /// `player.isQueuePopoverOpen` is true.
     private var queuePanel: NSPanel?
     private var queueDismissMonitors: [Any] = []
+    /// Polls the cursor against the Minim strip to drive its hover-expand.
+    /// Active only while the Minim theme is showing.
+    private var minimHoverTimer: Timer?
     /// Beak direction + position for the panel, so its tail points back at the
     /// overlay. Updated each time the panel is positioned.
     private let queueChrome = QueuePanelChrome()
@@ -91,6 +94,7 @@ final class OverlayWindowController: NSObject {
             NotificationCenter.default.removeObserver(observer)
         }
         windowVisibilityObservers.removeAll()
+        removeMinimHoverMonitor()
         dismissQueuePanel()
     }
 
@@ -161,6 +165,20 @@ final class OverlayWindowController: NSObject {
             player?.nudgeVolume(by: delta)
         }
         window.contentView = hosting
+        // Round the corners at the CALayer level, not just via SwiftUI's
+        // `.clipShape`. The SwiftUI clip lags an animated `setFrame` by a frame,
+        // so the back-most hit surface painted square corners at the very start
+        // of the Minim hover-unfold. A layer mask is part of the same layer
+        // AppKit animates, so it resizes in lockstep — no square flash. Only the
+        // glass themes (the rounded card *is* the window) get clipped; Aero /
+        // Classic float with no glass and rely on their content's own shadows
+        // spilling past the bounds, which `masksToBounds` would crop.
+        hosting.wantsLayer = true
+        if themes.current.behavior.hasGlassBackground {
+            hosting.layer?.cornerRadius = themes.current.layout.cornerRadius
+            hosting.layer?.cornerCurve = .continuous
+            hosting.layer?.masksToBounds = true
+        }
 
         window.center()
         window.makeKeyAndOrderFront(nil)
@@ -248,9 +266,13 @@ final class OverlayWindowController: NSObject {
         // window size to themes.current.layout.windowSize.
         let watcher: @MainActor () -> Void = { [weak self] in
             guard let self else { return }
-            // Drop Minim hover when leaving the theme so a stale flag doesn't
-            // cause the window to open in expanded state on re-entry.
-            if self.themes.current.id != "minim" {
+            // The Minim strip expands on hover; tear the hover monitor up/down
+            // with the theme so it only runs while Minim is showing, and clear a
+            // stale hover flag when leaving so we don't re-open expanded.
+            if self.themes.current.id == "minim" {
+                self.installMinimHoverMonitor()
+            } else {
+                self.removeMinimHoverMonitor()
                 self.player.minimHovered = false
             }
             self.applyWindowSizeForCurrentState()
@@ -267,6 +289,54 @@ final class OverlayWindowController: NSObject {
                 self?.applyWindowSizeForCurrentState()
                 self?.watchMinimHover()
             }
+        }
+    }
+
+    /// Hover detection for the Minim strip. Both an `NSTrackingArea` and
+    /// `.mouseMoved` event monitors proved unreliable: the tracking area's
+    /// mouse-exit could fail to fire across the hover-resize, and the event
+    /// monitors stop firing for moves over the desktop once JellyBeat itself is
+    /// the active app (a local monitor needs the event delivered to us; a global
+    /// one only sees other apps' events). Both left the strip stuck open. A
+    /// small timer that polls the cursor against the strip's footprint is immune
+    /// to all of that — it doesn't depend on event delivery or active-app state.
+    private func installMinimHoverMonitor() {
+        guard minimHoverTimer == nil else { return }
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateMinimHoverFromMouse() }
+        }
+        // .common so it keeps firing during window resize / event tracking.
+        RunLoop.main.add(timer, forMode: .common)
+        minimHoverTimer = timer
+        updateMinimHoverFromMouse()
+    }
+
+    private func removeMinimHoverMonitor() {
+        minimHoverTimer?.invalidate()
+        minimHoverTimer = nil
+    }
+
+    /// Set `minimHovered` from the live cursor position. The hover zone is the
+    /// strip's footprint *plus the space it unfolds into* — a rectangle anchored
+    /// at the (bottom-pinned) bottom edge, `expandedHeight` tall. Because that
+    /// rectangle is identical whether the strip is collapsed or expanded, moving
+    /// between the strip and the revealed info never thrashes the state, and
+    /// there's no race against the in-flight resize.
+    private func updateMinimHoverFromMouse() {
+        guard let window = overlayWindow, themes.current.id == "minim" else { return }
+        // Use the live window rect as the hover zone, which gives natural
+        // hysteresis and can't oscillate:
+        //  - Collapsed, the rect is just the strip, so it only expands when the
+        //    cursor is actually over the strip — never over the empty space the
+        //    info would unfold into (the old expanded-height zone did, which made
+        //    it flip open/closed unpredictably).
+        //  - Expanded, the rect is the whole card, so it stays open until the
+        //    cursor leaves all of it.
+        // Expand-zone ⊂ stay-zone, so there's no boundary where it flickers.
+        // Forced off while dragging so the strip stays collapsed during a move.
+        let inside = !isUserDragging && window.frame.contains(NSEvent.mouseLocation)
+        if player.minimHovered != inside {
+            player.minimHovered = inside
         }
     }
 
@@ -327,16 +397,31 @@ final class OverlayWindowController: NSObject {
     ///    falls back to centring at the previous window centre.
     private func applyWindowSizeForCurrentState() {
         guard let window = overlayWindow else { return }
-        // Never reposition while the user is dragging — a background poll
-        // firing mid-drag would yank the window out from under the cursor.
-        guard !isUserDragging else { return }
         let theme = themes.current
         let targetAmbient = isInAmbientMode && theme.artworkFrame != nil
+        // Never reposition while the user is dragging — a background poll firing
+        // mid-drag would yank the window out from under the cursor (and fight
+        // AppKit's own drag tracking).
+        guard !isUserDragging else { return }
 
         // The window's own drop-shadow looks like a frame around the cover
         // when the theme has no glass background (Aero). Suppress it there
         // and let the artwork's own shadow do the work.
         window.hasShadow = theme.behavior.hasGlassBackground
+
+        // Keep the content-layer corner mask in sync with the active theme (see
+        // createWindow). Glass themes clip to their rounded card; the floating
+        // themes turn it off so their content shadows aren't cropped.
+        if let layer = window.contentView?.layer {
+            if theme.behavior.hasGlassBackground {
+                layer.cornerRadius = theme.layout.cornerRadius
+                layer.cornerCurve = .continuous
+                layer.masksToBounds = true
+            } else {
+                layer.cornerRadius = 0
+                layer.masksToBounds = false
+            }
+        }
 
         // Decide next size.
         let nextSize: CGSize
@@ -352,24 +437,31 @@ final class OverlayWindowController: NSObject {
         var nextOrigin: CGPoint
         let snap = currentSnapEdges(window: window)
         if theme.id == "minim" && !targetAmbient {
-            // Determine grow direction: bars in the bottom half of the screen
-            // expand upward (anchor bottom edge); bars in the top half expand
-            // downward (anchor top edge) so the info section never runs off-screen.
-            let growsUpward: Bool
+            // The strip's rect must never move on hover — only the space it
+            // unfolds into is added. Recover the strip's resting bottom edge from
+            // the current frame using the active grow direction (its anchored
+            // edge is stable across the collapse/expand cycle).
+            let stripBottom = player.minimGrowsUpward
+                ? window.frame.minY
+                : window.frame.maxY - MinimTheme.barHeight
+            // Unfold upward by default; unfold downward only when the expanded
+            // height wouldn't fit above the strip — i.e. it's parked near the top
+            // (against the menu bar). Decided from the resting position, so it
+            // only flips when the strip is actually moved, never mid-hover.
             if let screen = window.screen ?? NSScreen.main {
                 let area = snapFrame(for: screen)
-                growsUpward = window.frame.midY <= (area.minY + area.maxY) / 2
-            } else {
-                growsUpward = true
+                player.minimGrowsUpward =
+                    stripBottom + MinimTheme.expandedHeight <= area.maxY
             }
-            player.minimGrowsUpward = growsUpward
-            let x = window.frame.midX - nextSize.width / 2
-            nextOrigin = CGPoint(
-                x: x,
-                y: growsUpward
-                    ? window.frame.minY                        // bottom-anchor
-                    : window.frame.maxY - nextSize.height      // top-anchor
-            )
+            let x = window.frame.minX
+            if player.minimHovered && player.minimGrowsUpward {
+                nextOrigin = CGPoint(x: x, y: stripBottom)                  // grow up: bottom pinned
+            } else if player.minimHovered {
+                // grow down: top pinned at the strip's top edge
+                nextOrigin = CGPoint(x: x, y: stripBottom + MinimTheme.barHeight - MinimTheme.expandedHeight)
+            } else {
+                nextOrigin = CGPoint(x: x, y: stripBottom)                  // collapsed: the strip itself
+            }
         } else if snap.isSnapped,
            let screen = window.screen ?? NSScreen.main {
             // Preserve the snapped edge(s) across resizes — including plain
@@ -394,8 +486,21 @@ final class OverlayWindowController: NSObject {
             let area = snapFrame(for: screen)
             nextOrigin.x = min(max(area.minX, nextOrigin.x),
                                area.maxX - nextSize.width)
-            nextOrigin.y = min(max(area.minY, nextOrigin.y),
-                               area.maxY - nextSize.height)
+            if theme.id == "minim" && !targetAmbient {
+                // The strip's bottom edge is sacred: it must stay exactly where
+                // the user parked it across the hover-expand. The generic upper
+                // clamp (`area.maxY - height`) would drag the bottom edge *down*
+                // whenever the expanded height doesn't fit above a strip resting
+                // near the top — which both jumps the strip on hover and makes
+                // it drift down a little each cycle. So clamp only the lower
+                // bound; if the unfolded info overruns the top, it tucks under
+                // the menu bar (rare — the strip lives near the bottom) rather
+                // than moving the strip.
+                nextOrigin.y = max(area.minY, nextOrigin.y)
+            } else {
+                nextOrigin.y = min(max(area.minY, nextOrigin.y),
+                                   area.maxY - nextSize.height)
+            }
         }
 
         // Skip the move entirely if nothing changed. `applyWindowSizeForCurrentState`
@@ -408,7 +513,20 @@ final class OverlayWindowController: NSObject {
             return
         }
         suppressMoveCallback = true
-        window.setFrame(nextFrame, display: true, animate: true)
+        if theme.id == "minim" {
+            // Animate the window with the exact same duration/curve as the
+            // Minim content's SwiftUI animation (0.16s ease-out) so the glass
+            // and the unfolding info move in lockstep. AppKit's default
+            // `animate: true` uses its own timing, and that mismatch was the
+            // small tug on unfold/fold.
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.16
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                window.animator().setFrame(nextFrame, display: true)
+            }
+        } else {
+            window.setFrame(nextFrame, display: true, animate: true)
+        }
         suppressMoveCallback = false
         windowIsAmbient = targetAmbient
     }
@@ -582,7 +700,24 @@ extension OverlayWindowController: NSWindowDelegate {
         // debounce the snap so it runs once movement stops (i.e. on release),
         // never mid-drag. Close the queue panel so it doesn't trail the drag.
         player.isQueuePopoverOpen = false
+        let startingDrag = !isUserDragging
         isUserDragging = true
+        // At the start of a Minim drag, collapse to the compact strip so the
+        // user repositions the strip itself — and can snap it flush against the
+        // menu bar — rather than the tall expanded card. Keep the strip's edge
+        // pinned (so it doesn't jump) and skip the synchronous redisplay so this
+        // doesn't fight AppKit's in-progress drag.
+        if startingDrag, themes.current.id == "minim", player.minimHovered {
+            let f = window.frame
+            let stripBottom = player.minimGrowsUpward ? f.minY : f.maxY - MinimTheme.barHeight
+            player.minimHovered = false
+            suppressMoveCallback = true
+            window.setFrame(
+                NSRect(x: f.minX, y: stripBottom, width: f.width, height: MinimTheme.barHeight),
+                display: false
+            )
+            suppressMoveCallback = false
+        }
         dragSettleTask?.cancel()
         dragSettleTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 200_000_000)
@@ -598,6 +733,13 @@ extension OverlayWindowController: NSWindowDelegate {
         guard let window = overlayWindow else { return }
         snapToEdgesIfClose(window)
         refreshSnapState()
+        // Re-decide the Minim unfold direction from where the strip came to rest:
+        // downward when it's parked near the top (no room above for the info).
+        if themes.current.id == "minim", let screen = window.screen {
+            let area = snapFrame(for: screen)
+            player.minimGrowsUpward =
+                window.frame.minY + MinimTheme.expandedHeight <= area.maxY
+        }
         if let screen = window.screen,
            let displayID = Self.displayID(of: screen) {
             settings.setOverlayPosition(window.frame.origin, forDisplay: displayID)
