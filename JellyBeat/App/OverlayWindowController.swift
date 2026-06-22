@@ -160,6 +160,15 @@ final class OverlayWindowController: NSObject {
         hosting.onScrollVolume = { [weak player] delta in
             player?.nudgeVolume(by: delta)
         }
+        // Robust whole-overlay hover, used by the Minim theme to unfold the
+        // strip. An AppKit tracking area survives the hover-driven window resize
+        // that trips up SwiftUI's `.onHover` (which can miss the mouse-exit and
+        // leave the strip stuck open). Only meaningful for Minim; ignored
+        // elsewhere.
+        hosting.onHoverChanged = { [weak self] inside in
+            guard let self, self.themes.current.id == "minim" else { return }
+            self.player.minimHovered = inside
+        }
         window.contentView = hosting
 
         window.center()
@@ -352,24 +361,13 @@ final class OverlayWindowController: NSObject {
         var nextOrigin: CGPoint
         let snap = currentSnapEdges(window: window)
         if theme.id == "minim" && !targetAmbient {
-            // Determine grow direction: bars in the bottom half of the screen
-            // expand upward (anchor bottom edge); bars in the top half expand
-            // downward (anchor top edge) so the info section never runs off-screen.
-            let growsUpward: Bool
-            if let screen = window.screen ?? NSScreen.main {
-                let area = snapFrame(for: screen)
-                growsUpward = window.frame.midY <= (area.minY + area.maxY) / 2
-            } else {
-                growsUpward = true
-            }
-            player.minimGrowsUpward = growsUpward
-            let x = window.frame.midX - nextSize.width / 2
-            nextOrigin = CGPoint(
-                x: x,
-                y: growsUpward
-                    ? window.frame.minY                        // bottom-anchor
-                    : window.frame.maxY - nextSize.height      // top-anchor
-            )
+            // Minim always unfolds upward: pin the current bottom-left corner so
+            // the strip never moves — the info section grows into the space above
+            // it on hover and collapses back cleanly. The width is constant
+            // (collapsed and expanded are both `windowSize.width`), so keeping
+            // minX/minY keeps both the bottom edge and the horizontal position
+            // exactly where the user left them.
+            nextOrigin = CGPoint(x: window.frame.minX, y: window.frame.minY)
         } else if snap.isSnapped,
            let screen = window.screen ?? NSScreen.main {
             // Preserve the snapped edge(s) across resizes — including plain
@@ -394,8 +392,21 @@ final class OverlayWindowController: NSObject {
             let area = snapFrame(for: screen)
             nextOrigin.x = min(max(area.minX, nextOrigin.x),
                                area.maxX - nextSize.width)
-            nextOrigin.y = min(max(area.minY, nextOrigin.y),
-                               area.maxY - nextSize.height)
+            if theme.id == "minim" && !targetAmbient {
+                // The strip's bottom edge is sacred: it must stay exactly where
+                // the user parked it across the hover-expand. The generic upper
+                // clamp (`area.maxY - height`) would drag the bottom edge *down*
+                // whenever the expanded height doesn't fit above a strip resting
+                // near the top — which both jumps the strip on hover and makes
+                // it drift down a little each cycle. So clamp only the lower
+                // bound; if the unfolded info overruns the top, it tucks under
+                // the menu bar (rare — the strip lives near the bottom) rather
+                // than moving the strip.
+                nextOrigin.y = max(area.minY, nextOrigin.y)
+            } else {
+                nextOrigin.y = min(max(area.minY, nextOrigin.y),
+                                   area.maxY - nextSize.height)
+            }
         }
 
         // Skip the move entirely if nothing changed. `applyWindowSizeForCurrentState`
@@ -858,11 +869,68 @@ final class ClickableHostingView<Content: View>: NSHostingView<Content> {
     /// `PlayerStore.nudgeVolume`. Scroll-up is positive (louder).
     var onScrollVolume: (@MainActor (Int) -> Void)?
 
+    /// Invoked when the cursor enters (`true`) or leaves (`false`) the overlay.
+    /// Backed by an `NSTrackingArea` rather than SwiftUI `.onHover` so it stays
+    /// correct across the Minim hover-resize: `.inVisibleRect` keeps the tracked
+    /// region glued to the (changing) bounds and `.activeAlways` fires even
+    /// though the floating overlay is never the key window.
+    var onHoverChanged: (@MainActor (Bool) -> Void)?
+
+    /// Our own tracking area, kept separate so `updateTrackingAreas` only ever
+    /// removes the one we added (never SwiftUI's internal ones).
+    private var hoverTrackingArea: NSTrackingArea?
+
+    /// Last hover state we reported, so we never fire a redundant callback (and
+    /// so the reconcile in `updateTrackingAreas` is idempotent).
+    private var lastHoverReported: Bool?
+
     /// Leftover precise-scroll distance (trackpad) not yet worth a whole step.
     private var scrollAccumulator: CGFloat = 0
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         super.hitTest(point) ?? (bounds.contains(point) ? self : nil)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = hoverTrackingArea {
+            removeTrackingArea(existing)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+
+        // A freshly created tracking area does NOT synthesize `mouseEntered`
+        // for a cursor that is already inside it. Without this, parking the
+        // pointer over the strip's spot at launch — or switching to Minim with
+        // the cursor already there — would leave it collapsed until the user
+        // jiggles the mouse. Seed the state from the actual pointer location.
+        if let window {
+            let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+            reportHover(bounds.contains(point))
+        }
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        reportHover(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        reportHover(false)
+    }
+
+    /// Forward a hover change only when it actually flips. `onHoverChanged`
+    /// hops to the main actor on the next runloop (it drives an Observation
+    /// watcher), so this never re-enters the in-progress layout/resize pass.
+    private func reportHover(_ inside: Bool) {
+        guard lastHoverReported != inside else { return }
+        lastHoverReported = inside
+        onHoverChanged?(inside)
     }
 
     /// Map vertical scrolling over the overlay to volume changes. Scroll events

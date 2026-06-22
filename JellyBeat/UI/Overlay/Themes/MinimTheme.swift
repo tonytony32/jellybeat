@@ -13,7 +13,7 @@ struct MinimTheme: OverlayTheme {
     /// `barHeight + infoHeight` (== `expandedHeight`) when hovered; the info
     /// section is given exactly `infoHeight` so the reveal is deterministic
     /// rather than relying on intrinsic-size overflow.
-    nonisolated static let barHeight: CGFloat = 52
+    nonisolated static let barHeight: CGFloat = 48
     nonisolated static let infoHeight: CGFloat = 78
     nonisolated static let expandedHeight: CGFloat = barHeight + infoHeight
 
@@ -56,25 +56,18 @@ private struct MinimBody: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // The info section is laid out at a fixed height and the bar is
-            // pinned to the window's anchored edge (bottom when the strip grows
-            // upward, top when it grows downward). While collapsed the window is
-            // only `barHeight` tall, so the info section sits beyond the edge
-            // and is clipped by the window's rounded rect; as the window grows
-            // it scrolls into view.
-            if store.minimGrowsUpward {
-                infoSection
-                compactBar
-            } else {
-                compactBar
-                infoSection
-            }
+            infoSection
+            compactBar
         }
-        .frame(
-            maxHeight: .infinity,
-            alignment: store.minimGrowsUpward ? .bottom : .top
-        )
-        .onHover { store.minimHovered = $0 }
+        // The strip is pinned to the bottom; the info section sits above it at a
+        // fixed height. While collapsed the window is only `barHeight` tall, so
+        // the info section is above the top edge and clipped by the window's
+        // rounded rect; on hover the window unfolds upward and the info scrolls
+        // into view. The strip's bottom edge never moves (the window controller
+        // keeps it pinned). Hover is tracked at the AppKit layer
+        // (`ClickableHostingView`), not with SwiftUI `.onHover`, so it stays
+        // reliable across the resize.
+        .frame(maxHeight: .infinity, alignment: .bottom)
     }
 
     // MARK: - Compact bar
@@ -84,7 +77,7 @@ private struct MinimBody: View {
             ArtworkView(
                 itemId: track.artworkItemId,
                 imageTag: track.imageTag,
-                size: 36,
+                size: 34,
                 cornerRadius: 6,
                 shadowOpacity: 0,
                 artworkURL: track.artworkURL,
@@ -132,9 +125,9 @@ private struct MinimBody: View {
         Button {
             if store.volume > 0 {
                 volumeBeforeMute = store.volume
-                store.nudgeVolume(by: -store.volume)
+                store.setVolume(toPercent: 0)
             } else {
-                store.nudgeVolume(by: volumeBeforeMute ?? 100)
+                store.setVolume(toPercent: volumeBeforeMute ?? 100)
                 volumeBeforeMute = nil
             }
         } label: {
