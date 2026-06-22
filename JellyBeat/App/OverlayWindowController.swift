@@ -51,9 +51,9 @@ final class OverlayWindowController: NSObject {
     /// `player.isQueuePopoverOpen` is true.
     private var queuePanel: NSPanel?
     private var queueDismissMonitors: [Any] = []
-    /// Global + local `.mouseMoved` monitors that drive the Minim strip's
-    /// hover-expand. Active only while the Minim theme is showing.
-    private var minimHoverMonitors: [Any] = []
+    /// Polls the cursor against the Minim strip to drive its hover-expand.
+    /// Active only while the Minim theme is showing.
+    private var minimHoverTimer: Timer?
     /// Beak direction + position for the panel, so its tail points back at the
     /// overlay. Updated each time the panel is positioned.
     private let queueChrome = QueuePanelChrome()
@@ -278,30 +278,28 @@ final class OverlayWindowController: NSObject {
         }
     }
 
-    /// Hover detection for the Minim strip. An `NSTrackingArea` proved
-    /// unreliable across the hover-driven window resize (the mouse-exit could
-    /// fail to fire, leaving the strip stuck open). Instead we poll the cursor
-    /// against the strip's footprint on every mouse move — the same global/local
-    /// monitor pattern the queue panel uses for click-outside dismissal — which
-    /// is immune to the resize entirely.
+    /// Hover detection for the Minim strip. Both an `NSTrackingArea` and
+    /// `.mouseMoved` event monitors proved unreliable: the tracking area's
+    /// mouse-exit could fail to fire across the hover-resize, and the event
+    /// monitors stop firing for moves over the desktop once JellyBeat itself is
+    /// the active app (a local monitor needs the event delivered to us; a global
+    /// one only sees other apps' events). Both left the strip stuck open. A
+    /// small timer that polls the cursor against the strip's footprint is immune
+    /// to all of that — it doesn't depend on event delivery or active-app state.
     private func installMinimHoverMonitor() {
-        guard minimHoverMonitors.isEmpty else { return }
-        let local = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved]) { [weak self] event in
-            Task { @MainActor [weak self] in self?.updateMinimHoverFromMouse() }
-            return event
+        guard minimHoverTimer == nil else { return }
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateMinimHoverFromMouse() }
         }
-        let global = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.updateMinimHoverFromMouse() }
-        }
-        minimHoverMonitors = [local, global].compactMap { $0 }
+        // .common so it keeps firing during window resize / event tracking.
+        RunLoop.main.add(timer, forMode: .common)
+        minimHoverTimer = timer
         updateMinimHoverFromMouse()
     }
 
     private func removeMinimHoverMonitor() {
-        for monitor in minimHoverMonitors {
-            NSEvent.removeMonitor(monitor)
-        }
-        minimHoverMonitors.removeAll()
+        minimHoverTimer?.invalidate()
+        minimHoverTimer = nil
     }
 
     /// Set `minimHovered` from the live cursor position. The hover zone is the
@@ -465,7 +463,20 @@ final class OverlayWindowController: NSObject {
             return
         }
         suppressMoveCallback = true
-        window.setFrame(nextFrame, display: true, animate: true)
+        if theme.id == "minim" {
+            // Animate the window with the exact same duration/curve as the
+            // Minim content's SwiftUI animation (0.16s ease-out) so the glass
+            // and the unfolding info move in lockstep. AppKit's default
+            // `animate: true` uses its own timing, and that mismatch was the
+            // small tug on unfold/fold.
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.16
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                window.animator().setFrame(nextFrame, display: true)
+            }
+        } else {
+            window.setFrame(nextFrame, display: true, animate: true)
+        }
         suppressMoveCallback = false
         windowIsAmbient = targetAmbient
     }

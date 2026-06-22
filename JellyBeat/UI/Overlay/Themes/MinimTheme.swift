@@ -56,14 +56,12 @@ private struct MinimBody: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // The info section only exists while expanded, so the content height
-            // matches the window height exactly in each state (bar = 48 when
-            // collapsed, bar + info = 126 when hovered). This is deterministic —
-            // it doesn't rely on clipping an oversized stack, which anchored
-            // unreliably and could leave the wrong slice (the progress row)
-            // showing when collapsed. Hover is driven by a mouse-moved monitor
-            // in OverlayWindowController, which pins the window's bottom edge so
-            // the strip never moves as the info appears above it.
+            // The info section is only in the tree while expanded, so the content
+            // height matches the window height exactly in each state (48 = strip,
+            // 126 = strip + info). Deterministic: no oversized stack to clip, so
+            // the collapsed strip can never show the wrong slice. The window
+            // resize (controller) and this content change share the same 0.16s
+            // ease-out so they move together — that sync is what removes the jerk.
             if store.minimHovered {
                 infoSection
                     .transition(.opacity)
