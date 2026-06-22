@@ -51,6 +51,9 @@ final class OverlayWindowController: NSObject {
     /// `player.isQueuePopoverOpen` is true.
     private var queuePanel: NSPanel?
     private var queueDismissMonitors: [Any] = []
+    /// Global + local `.mouseMoved` monitors that drive the Minim strip's
+    /// hover-expand. Active only while the Minim theme is showing.
+    private var minimHoverMonitors: [Any] = []
     /// Beak direction + position for the panel, so its tail points back at the
     /// overlay. Updated each time the panel is positioned.
     private let queueChrome = QueuePanelChrome()
@@ -91,6 +94,7 @@ final class OverlayWindowController: NSObject {
             NotificationCenter.default.removeObserver(observer)
         }
         windowVisibilityObservers.removeAll()
+        removeMinimHoverMonitor()
         dismissQueuePanel()
     }
 
@@ -159,15 +163,6 @@ final class OverlayWindowController: NSObject {
         hosting.frame = contentRect
         hosting.onScrollVolume = { [weak player] delta in
             player?.nudgeVolume(by: delta)
-        }
-        // Robust whole-overlay hover, used by the Minim theme to unfold the
-        // strip. An AppKit tracking area survives the hover-driven window resize
-        // that trips up SwiftUI's `.onHover` (which can miss the mouse-exit and
-        // leave the strip stuck open). Only meaningful for Minim; ignored
-        // elsewhere.
-        hosting.onHoverChanged = { [weak self] inside in
-            guard let self, self.themes.current.id == "minim" else { return }
-            self.player.minimHovered = inside
         }
         window.contentView = hosting
 
@@ -257,9 +252,13 @@ final class OverlayWindowController: NSObject {
         // window size to themes.current.layout.windowSize.
         let watcher: @MainActor () -> Void = { [weak self] in
             guard let self else { return }
-            // Drop Minim hover when leaving the theme so a stale flag doesn't
-            // cause the window to open in expanded state on re-entry.
-            if self.themes.current.id != "minim" {
+            // The Minim strip expands on hover; tear the hover monitor up/down
+            // with the theme so it only runs while Minim is showing, and clear a
+            // stale hover flag when leaving so we don't re-open expanded.
+            if self.themes.current.id == "minim" {
+                self.installMinimHoverMonitor()
+            } else {
+                self.removeMinimHoverMonitor()
                 self.player.minimHovered = false
             }
             self.applyWindowSizeForCurrentState()
@@ -276,6 +275,53 @@ final class OverlayWindowController: NSObject {
                 self?.applyWindowSizeForCurrentState()
                 self?.watchMinimHover()
             }
+        }
+    }
+
+    /// Hover detection for the Minim strip. An `NSTrackingArea` proved
+    /// unreliable across the hover-driven window resize (the mouse-exit could
+    /// fail to fire, leaving the strip stuck open). Instead we poll the cursor
+    /// against the strip's footprint on every mouse move — the same global/local
+    /// monitor pattern the queue panel uses for click-outside dismissal — which
+    /// is immune to the resize entirely.
+    private func installMinimHoverMonitor() {
+        guard minimHoverMonitors.isEmpty else { return }
+        let local = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved]) { [weak self] event in
+            Task { @MainActor [weak self] in self?.updateMinimHoverFromMouse() }
+            return event
+        }
+        let global = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.updateMinimHoverFromMouse() }
+        }
+        minimHoverMonitors = [local, global].compactMap { $0 }
+        updateMinimHoverFromMouse()
+    }
+
+    private func removeMinimHoverMonitor() {
+        for monitor in minimHoverMonitors {
+            NSEvent.removeMonitor(monitor)
+        }
+        minimHoverMonitors.removeAll()
+    }
+
+    /// Set `minimHovered` from the live cursor position. The hover zone is the
+    /// strip's footprint *plus the space it unfolds into* — a rectangle anchored
+    /// at the (bottom-pinned) bottom edge, `expandedHeight` tall. Because that
+    /// rectangle is identical whether the strip is collapsed or expanded, moving
+    /// between the strip and the revealed info never thrashes the state, and
+    /// there's no race against the in-flight resize.
+    private func updateMinimHoverFromMouse() {
+        guard let window = overlayWindow, themes.current.id == "minim" else { return }
+        let frame = window.frame
+        let zone = CGRect(
+            x: frame.minX,
+            y: frame.minY,
+            width: frame.width,
+            height: MinimTheme.expandedHeight
+        )
+        let inside = zone.contains(NSEvent.mouseLocation)
+        if player.minimHovered != inside {
+            player.minimHovered = inside
         }
     }
 
@@ -869,68 +915,11 @@ final class ClickableHostingView<Content: View>: NSHostingView<Content> {
     /// `PlayerStore.nudgeVolume`. Scroll-up is positive (louder).
     var onScrollVolume: (@MainActor (Int) -> Void)?
 
-    /// Invoked when the cursor enters (`true`) or leaves (`false`) the overlay.
-    /// Backed by an `NSTrackingArea` rather than SwiftUI `.onHover` so it stays
-    /// correct across the Minim hover-resize: `.inVisibleRect` keeps the tracked
-    /// region glued to the (changing) bounds and `.activeAlways` fires even
-    /// though the floating overlay is never the key window.
-    var onHoverChanged: (@MainActor (Bool) -> Void)?
-
-    /// Our own tracking area, kept separate so `updateTrackingAreas` only ever
-    /// removes the one we added (never SwiftUI's internal ones).
-    private var hoverTrackingArea: NSTrackingArea?
-
-    /// Last hover state we reported, so we never fire a redundant callback (and
-    /// so the reconcile in `updateTrackingAreas` is idempotent).
-    private var lastHoverReported: Bool?
-
     /// Leftover precise-scroll distance (trackpad) not yet worth a whole step.
     private var scrollAccumulator: CGFloat = 0
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         super.hitTest(point) ?? (bounds.contains(point) ? self : nil)
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let existing = hoverTrackingArea {
-            removeTrackingArea(existing)
-        }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(area)
-        hoverTrackingArea = area
-
-        // A freshly created tracking area does NOT synthesize `mouseEntered`
-        // for a cursor that is already inside it. Without this, parking the
-        // pointer over the strip's spot at launch — or switching to Minim with
-        // the cursor already there — would leave it collapsed until the user
-        // jiggles the mouse. Seed the state from the actual pointer location.
-        if let window {
-            let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
-            reportHover(bounds.contains(point))
-        }
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        reportHover(true)
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        reportHover(false)
-    }
-
-    /// Forward a hover change only when it actually flips. `onHoverChanged`
-    /// hops to the main actor on the next runloop (it drives an Observation
-    /// watcher), so this never re-enters the in-progress layout/resize pass.
-    private func reportHover(_ inside: Bool) {
-        guard lastHoverReported != inside else { return }
-        lastHoverReported = inside
-        onHoverChanged?(inside)
     }
 
     /// Map vertical scrolling over the overlay to volume changes. Scroll events

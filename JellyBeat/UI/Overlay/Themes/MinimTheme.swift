@@ -56,18 +56,22 @@ private struct MinimBody: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            infoSection
+            // The info section only exists while expanded, so the content height
+            // matches the window height exactly in each state (bar = 48 when
+            // collapsed, bar + info = 126 when hovered). This is deterministic —
+            // it doesn't rely on clipping an oversized stack, which anchored
+            // unreliably and could leave the wrong slice (the progress row)
+            // showing when collapsed. Hover is driven by a mouse-moved monitor
+            // in OverlayWindowController, which pins the window's bottom edge so
+            // the strip never moves as the info appears above it.
+            if store.minimHovered {
+                infoSection
+                    .transition(.opacity)
+            }
             compactBar
         }
-        // The strip is pinned to the bottom; the info section sits above it at a
-        // fixed height. While collapsed the window is only `barHeight` tall, so
-        // the info section is above the top edge and clipped by the window's
-        // rounded rect; on hover the window unfolds upward and the info scrolls
-        // into view. The strip's bottom edge never moves (the window controller
-        // keeps it pinned). Hover is tracked at the AppKit layer
-        // (`ClickableHostingView`), not with SwiftUI `.onHover`, so it stays
-        // reliable across the resize.
         .frame(maxHeight: .infinity, alignment: .bottom)
+        .animation(.easeOut(duration: 0.16), value: store.minimHovered)
     }
 
     // MARK: - Compact bar
