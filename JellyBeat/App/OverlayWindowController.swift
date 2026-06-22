@@ -352,13 +352,23 @@ final class OverlayWindowController: NSObject {
         var nextOrigin: CGPoint
         let snap = currentSnapEdges(window: window)
         if theme.id == "minim" && !targetAmbient {
-            // Minim: always anchor to the window's current bottom edge so the
-            // compact bar stays on screen while the info section grows upward
-            // on hover (and collapses cleanly on leave). Horizontal position
-            // is kept centred; the clamping pass below handles screen bounds.
+            // Determine grow direction: bars in the bottom half of the screen
+            // expand upward (anchor bottom edge); bars in the top half expand
+            // downward (anchor top edge) so the info section never runs off-screen.
+            let growsUpward: Bool
+            if let screen = window.screen ?? NSScreen.main {
+                let area = snapFrame(for: screen)
+                growsUpward = window.frame.midY <= (area.minY + area.maxY) / 2
+            } else {
+                growsUpward = true
+            }
+            player.minimGrowsUpward = growsUpward
+            let x = window.frame.midX - nextSize.width / 2
             nextOrigin = CGPoint(
-                x: window.frame.midX - nextSize.width / 2,
-                y: window.frame.minY
+                x: x,
+                y: growsUpward
+                    ? window.frame.minY                        // bottom-anchor
+                    : window.frame.maxY - nextSize.height      // top-anchor
             )
         } else if snap.isSnapped,
            let screen = window.screen ?? NSScreen.main {
