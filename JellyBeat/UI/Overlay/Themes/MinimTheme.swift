@@ -9,10 +9,11 @@ struct MinimTheme: OverlayTheme {
     nonisolated let displayName = "Minim"
     nonisolated let author = "Built-in"
 
-    /// Fixed heights. The window is `barHeight` when collapsed and
-    /// `barHeight + infoHeight` (== `expandedHeight`) when hovered; the info
-    /// section is given exactly `infoHeight` so the reveal is deterministic
-    /// rather than relying on intrinsic-size overflow.
+    /// Fixed heights. The window is ALWAYS `expandedHeight` tall (see
+    /// `layout.windowSize`); it never resizes on hover. Collapsed, only the
+    /// bottom `barHeight` strip is drawn and the `infoHeight` above it is left
+    /// transparent; hovering grows a glass card over that space in SwiftUI. The
+    /// info section is given exactly `infoHeight` so the reveal is deterministic.
     nonisolated static let barHeight: CGFloat = 48
     nonisolated static let infoHeight: CGFloat = 78
     nonisolated static let expandedHeight: CGFloat = barHeight + infoHeight
@@ -21,7 +22,7 @@ struct MinimTheme: OverlayTheme {
         orientation: .minimal,
         artworkSize: nil,
         controlsPosition: .beside,
-        windowSize: CGSize(width: 360, height: MinimTheme.barHeight),
+        windowSize: CGSize(width: 360, height: MinimTheme.expandedHeight),
         padding: 10,
         cornerRadius: 14
     )
@@ -55,27 +56,52 @@ private struct MinimBody: View {
     @State private var volumeBeforeMute: Int?
 
     var body: some View {
+        // The window is FIXED at `expandedHeight` and never moves on hover (see
+        // OverlayWindowController). The strip is anchored to its parked edge
+        // inside that fixed window; hovering only grows a glass card — height
+        // animated purely in SwiftUI — over the otherwise-transparent reveal
+        // space. Because the window never resizes, the strip's screen position is
+        // constant: the jump that came from animating the NSWindow frame (the CA
+        // window animation drifting against the anchored SwiftUI content) is gone
+        // by construction. The info is always laid out but clipped away until the
+        // growing card uncovers it, so nothing pops in or out of the layout.
+        let anchor: Alignment = store.minimGrowsUpward ? .bottom : .top
+        let cardHeight = store.minimHovered ? MinimTheme.expandedHeight : MinimTheme.barHeight
+
+        ZStack(alignment: anchor) {
+            // Glass card. Its height is the only animated property; the window's
+            // own shadow (AppKit, set in OverlayWindowController) hugs this opaque
+            // shape and so reshapes with it — no SwiftUI shadow, which couldn't
+            // render outside the fixed window when the card fills it.
+            GlassBackground(
+                material: theme.behavior.glassMaterial,
+                cornerRadius: theme.layout.cornerRadius
+            )
+            .frame(height: cardHeight)
+
+            contentStack
+                .frame(height: cardHeight, alignment: anchor)
+                .clipShape(RoundedRectangle(cornerRadius: theme.layout.cornerRadius, style: .continuous))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: anchor)
+        .animation(.easeOut(duration: 0.18), value: store.minimHovered)
+    }
+
+    /// Strip + info stacked in grow order. Both are *always* present at their
+    /// full height; the card's animated clip is what reveals or hides the info,
+    /// so the strip's layout never changes and can't shift.
+    @ViewBuilder
+    private var contentStack: some View {
         VStack(spacing: 0) {
-            // The info section is only in the tree while expanded, so the content
-            // height matches the window height exactly in each state (48 = strip,
-            // 126 = strip + info). Deterministic: no oversized stack to clip, so
-            // the collapsed strip can never show the wrong slice. The window
-            // resize (controller) and this content change share the same 0.16s
-            // ease-out so they move together — that sync is what removes the jerk.
-            //
-            // The strip pins to the anchored edge and the info unfolds away from
-            // it: upward (info above the strip) normally, downward (info below)
-            // when the strip is parked against the menu bar.
             if store.minimGrowsUpward {
-                if store.minimHovered { infoSection.transition(.opacity) }
+                infoSection
                 compactBar
             } else {
                 compactBar
-                if store.minimHovered { infoSection.transition(.opacity) }
+                infoSection
             }
         }
-        .frame(maxHeight: .infinity, alignment: store.minimGrowsUpward ? .bottom : .top)
-        .animation(.easeOut(duration: 0.16), value: store.minimHovered)
+        .frame(height: MinimTheme.expandedHeight)
     }
 
     // MARK: - Compact bar
@@ -120,6 +146,8 @@ private struct MinimBody: View {
             Spacer(minLength: 0)
 
             if store.capabilities.canSetVolume {
+                // Part of the always-on strip: art, transport, volume. Visible
+                // whether collapsed or expanded.
                 volumeButton
             }
         }
@@ -224,6 +252,9 @@ private struct MinimBody: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 14)
         .frame(height: MinimTheme.infoHeight)
+        // Clipped out of view while collapsed; also keep it non-interactive then
+        // so its controls can't be hit through the transparent reveal space.
+        .allowsHitTesting(store.minimHovered)
     }
 
     private func formattedTime(_ duration: Duration) -> String {

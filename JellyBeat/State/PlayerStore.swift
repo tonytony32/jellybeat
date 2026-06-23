@@ -869,6 +869,15 @@ final class PlayerStore {
         }
     }
 
+    /// Dismiss the volume HUD now instead of waiting out its linger timer. The
+    /// Minim strip uses this so the HUD fades out together with the card on
+    /// collapse rather than hanging, detached, over the bare strip.
+    func dismissVolumeFeedback() {
+        volumeFeedbackTask?.cancel()
+        volumeFeedbackTask = nil
+        volumeFeedback = nil
+    }
+
     /// Toggle the "favorite" flag on the currently playing item. Optimistic:
     /// the heart flips immediately, then the request reconciles with the
     /// server. On failure it reverts (only if the same track is still showing)

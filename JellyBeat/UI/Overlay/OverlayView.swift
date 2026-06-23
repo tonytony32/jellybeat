@@ -24,6 +24,21 @@ struct OverlayView: View {
         return false
     }
 
+    /// True while the Minim strip itself is on screen (a track is rendering). In
+    /// that state Minim owns its whole card — a glass panel whose height animates
+    /// in SwiftUI inside a fixed-size window — so the shared chrome here (the
+    /// full-window glass, the rounded clip, and the hit-catching fill) must step
+    /// aside: it would paint a full-height card and clip Minim's own shadow. The
+    /// special states (idle / error / nothing-playing) still use the shared
+    /// chrome, so this is gated on an actual track being shown.
+    private var isMinimStrip: Bool {
+        guard themes.current.id == "minim", player.currentTrack != nil else { return false }
+        switch player.connectionState {
+        case .connecting, .connected, .reconnecting: return true
+        default: return false
+        }
+    }
+
     private var chromeOpacity: Double {
         if !isAmbient { return 1.0 }
         return (ambientHover || player.anticipating) ? 1.0 : 0.0
@@ -58,8 +73,14 @@ struct OverlayView: View {
             // Aero). 0.005 (~1.3/255) is imperceptible while still a *real*
             // color. If gap clicks ever start revealing the desktop again,
             // nudge this up slightly.
-            Color.black.opacity(0.005)
-            if themes.current.behavior.hasGlassBackground && !isAmbient {
+            // Skipped for the Minim strip: its reveal space must stay truly
+            // transparent so (a) clicks above the collapsed strip pass through and
+            // (b) the window's shadow hugs only the glass card, not the full
+            // fixed-height window. Minim draws its own card + hit surface.
+            if !isMinimStrip {
+                Color.black.opacity(0.005)
+            }
+            if themes.current.behavior.hasGlassBackground && !isAmbient && !isMinimStrip {
                 GlassBackground(
                     material: themes.current.behavior.glassMaterial,
                     cornerRadius: themes.current.layout.cornerRadius
