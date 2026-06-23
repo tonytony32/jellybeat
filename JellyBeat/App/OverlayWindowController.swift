@@ -398,16 +398,16 @@ final class OverlayWindowController: NSObject {
     private func applyWindowSizeForCurrentState() {
         guard let window = overlayWindow else { return }
         let theme = themes.current
-        let targetAmbient = isInAmbientMode && theme.artworkFrame != nil
+        let targetAmbient = isInAmbientMode
         // Never reposition while the user is dragging — a background poll firing
         // mid-drag would yank the window out from under the cursor (and fight
         // AppKit's own drag tracking).
         guard !isUserDragging else { return }
 
-        // The window's own drop-shadow looks like a frame around the cover
-        // when the theme has no glass background (Aero). Suppress it there
-        // and let the artwork's own shadow do the work.
-        window.hasShadow = theme.behavior.hasGlassBackground
+        // In ambient mode every theme behaves like Classic: no window shadow
+        // and a fixed 120×120 footprint regardless of the active theme.
+        // Outside ambient, restore each theme's own shadow preference.
+        window.hasShadow = !targetAmbient && theme.behavior.hasGlassBackground
 
         // Keep the content-layer corner mask in sync with the active theme (see
         // createWindow). Glass themes clip to their rounded card; the floating
@@ -425,8 +425,8 @@ final class OverlayWindowController: NSObject {
 
         // Decide next size.
         let nextSize: CGSize
-        if targetAmbient, let art = theme.artworkFrame {
-            nextSize = art.size
+        if targetAmbient {
+            nextSize = CGSize(width: 120, height: 120)
         } else if theme.id == "minim" && player.minimHovered {
             nextSize = CGSize(width: theme.layout.windowSize.width, height: MinimTheme.expandedHeight)
         } else {

@@ -59,7 +59,7 @@ struct OverlayView: View {
             // color. If gap clicks ever start revealing the desktop again,
             // nudge this up slightly.
             Color.black.opacity(0.005)
-            if themes.current.behavior.hasGlassBackground {
+            if themes.current.behavior.hasGlassBackground && !isAmbient {
                 GlassBackground(
                     material: themes.current.behavior.glassMaterial,
                     cornerRadius: themes.current.layout.cornerRadius
