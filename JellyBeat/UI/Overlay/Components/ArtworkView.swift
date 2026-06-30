@@ -88,6 +88,9 @@ struct ArtworkView: View {
                 ClientLauncher.openJellyfin(url)
             }
         }
+        // Right-click the cover (any theme) to pick the source / open Settings
+        // in place, mirroring the menu-bar item — useful when it's hidden.
+        .contextMenu { ArtworkContextMenu() }
         .task(id: LoadKey(itemId: itemId, tag: imageTag, url: artworkURL, cacheReady: provider.cache != nil)) {
             await loadImage()
         }

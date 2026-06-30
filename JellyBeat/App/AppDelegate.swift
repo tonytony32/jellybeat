@@ -48,12 +48,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.player = player
         self.themes = themes
         self.artworkProvider = artworkProvider
-        self.windowController = OverlayWindowController(
-            settings: settings,
-            player: player,
-            themes: themes,
-            artworkProvider: artworkProvider
-        )
         let connection = PlaybackConnectionCoordinator(
             settings: settings,
             player: player,
@@ -65,11 +59,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // against Jellyfin (the privileged non-loopback built-in).
         let registry = SourceRegistry.loadingFromDisk()
         self.registry = registry
-        self.arbiter = SourceArbiter(
+        let arbiter = SourceArbiter(
             settings: settings,
             player: player,
             coordinator: connection,
             registry: registry
+        )
+        self.arbiter = arbiter
+        // Built after the registry/arbiter so the overlay can expose them to the
+        // artwork right-click menu (source picker + Settings).
+        self.windowController = OverlayWindowController(
+            settings: settings,
+            player: player,
+            themes: themes,
+            artworkProvider: artworkProvider,
+            registry: registry,
+            arbiter: arbiter
         )
         super.init()
         // Tell macOS not to restore Settings between launches. Without this,
