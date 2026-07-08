@@ -1,7 +1,9 @@
 # JellyBeat
 <img width="1424" height="810" alt=" 2026-06-19 a las 12 24 53" src="https://github.com/user-attachments/assets/4fd3d46b-bc88-421c-a0b5-7fa06ed3a045" />
 
-JellyBeat is a floooating now-playing overlay for 🎵 in macOS. Home is a remote Jellyfin server, mirrored over the REST API and the `/socket` push feed, but it could also pick up whatever else is playing: YouTube in Safari, or any third-party loopback source. [Sleeve by Replay][sleeve] was the visual inspiration. Everything under the hood is built from scratch for Jellyfin, with no AppleScript and no Apple Music dependency. Because of reasons.
+If you do care about music, you must have a local library of files: Mp3s with different bitrates, FLACs, ALACs, and more. But having the files is just the beginning, because metadata is what keeps your collection organised and pristine. However, whenever you want to play your music, file browsing is not enough. You need a full player that leverages metadata to cater the music experience to you. This is when Jellyfin for music comes in.
+
+JellyBeat is a floooating now-playing overlay for Jellyfin Music 🎵 in macOS. Home is a remote Jellyfin server, mirrored over the REST API and the `/socket` push feed, but it could also pick up whatever else is playing: YouTube in Safari, or any third-party loopback source. [Sleeve by Replay][sleeve] was the visual inspiration. Everything under the hood is built from scratch for Jellyfin, with no AppleScript and no Apple Music dependency. Because of reasons.
 
 [sleeve]: https://replay.software/sleeve
 
