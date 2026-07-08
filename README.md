@@ -1,14 +1,13 @@
 # JellyBeat
 <img width="1424" height="810" alt=" 2026-06-19 a las 12 24 53" src="https://github.com/user-attachments/assets/4fd3d46b-bc88-421c-a0b5-7fa06ed3a045" />
 
-A floooating now-playing overlay for 🎵 in macOS. Home base is a remote Jellyfin server, mirrored over the REST API and the `/socket` push feed, but it'll also
-pick up whatever else is playing: YouTube in Safari, or any third-party loopback source. [Sleeve by Replay][sleeve] was the visual inspiration. Everything under the hood is built from scratch for Jellyfin, with no AppleScript and no Apple Music dependency. Because of reasons.
+JellyBeat is a floooating now-playing overlay for 🎵 in macOS. Home is a remote Jellyfin server, mirrored over the REST API and the `/socket` push feed, but it could also pick up whatever else is playing: YouTube in Safari, or any third-party loopback source. [Sleeve by Replay][sleeve] was the visual inspiration. Everything under the hood is built from scratch for Jellyfin, with no AppleScript and no Apple Music dependency. Because of reasons.
 
 [sleeve]: https://replay.software/sleeve
 
 ## Features
 
-- 🎵 **One overlay, many sources.** Jellyfin is home. A personal music library is top, and this is the reason why Jellyfin is the player, while I keep GBs of mp3s, m4as, and flacs carefully curated with [Musicbrainz](https://musicbrainz.org/) tags and covers. However, YouTube, YouTube Music and any loopback plugin get picked up on their own (fingers crossed). Whatever you started last is what you see.
+- 🎵 **One overlay, many sources.** Jellyfin is home. For anyone who cares about music, a personal music library is a must, and this is the reason why Jellyfin is the player, while I keep GBs of mp3s, m4as, and flacs carefully curated with [Musicbrainz](https://musicbrainz.org/) tags and covers. However, YouTube, YouTube Music and any loopback plugin get picked up on their own (fingers crossed). Whatever you started last is what you see.
 - 🪟 **There when you want it, gone when you don't.** A borderless window that floooats over every Space, then shrinks to just the artwork and disappears the moment the music stops.
 - ⚡ **Real-time, not refresh-and-pray.** Sub-second updates over WebSocket, with a REST fallback that steps in by itself if the socket drops.
 - 🎨 **Themes that actually rearrange things.** Standard, Classic, Minim and Aero are real layout presets, not a recoloured skin.
