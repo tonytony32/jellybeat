@@ -1,7 +1,7 @@
 # JellyBeat
 <img width="1424" height="810" alt=" 2026-06-19 a las 12 24 53" src="https://github.com/user-attachments/assets/4fd3d46b-bc88-421c-a0b5-7fa06ed3a045" />
 
-If you do care about music, you must have a local library of files: Mp3s with different bitrates, FLACs, ALACs, and more. But having the files is just the beginning, because metadata is what keeps your collection organised and pristine. However, whenever you want to play your music, file browsing is not enough. You need a full player that leverages metadata to cater the music experience to you. This is when Jellyfin for music comes in.
+If you do care about music, you must have a local library of files: Mp3s with different bitrates, FLACs, ALACs, and more. But having the files is just the beginning, because [metadata](https://picard.musicbrainz.org/) is what keeps your collection organised and pristine. However, whenever you want to play your music, file browsing is not enough. You need a full player that leverages metadata to cater the music experience to you. This is when [Jellyfin](https://jellyfin.org/) for music comes in.
 
 JellyBeat is a floooating now-playing overlay for Jellyfin Music 🎵 in macOS. Home is a remote Jellyfin server, mirrored over the REST API and the `/socket` push feed, but it could also pick up whatever else is playing: YouTube in Safari, or any third-party loopback source. [Sleeve by Replay][sleeve] was the visual inspiration. Everything under the hood is built from scratch for Jellyfin, with no AppleScript and no Apple Music dependency. Because of reasons.
 
@@ -43,6 +43,8 @@ JellyBeat is a floooating now-playing overlay for Jellyfin Music 🎵 in macOS. 
 - An API key from **Jellyfin Dashboard → Advanced → API Keys**
 - Your user ID from **Dashboard → Users → your user**
 
+My personal recommendation is to run a Jellyfin server on a Raspberry Pi, attach a HDD to it, and stream anywhere.
+
 ## Build
 
 It's a vanilla SwiftUI and AppKit hybrid, zero external dependencies. Open it in Xcode 26.5 or later:
@@ -63,6 +65,8 @@ xcodebuild -project JellyBeat.xcodeproj -scheme JellyBeat \
 The `.app` lands somewhere under `~/Library/Developer/Xcode/DerivedData/…`.
 Copy it into `/Applications` and you can launch it from Spotlight or Launchpad
 like anything else.
+
+Eventually I will release the .dmg
 
 ## Configure
 
