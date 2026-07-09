@@ -48,12 +48,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.player = player
         self.themes = themes
         self.artworkProvider = artworkProvider
-        self.windowController = OverlayWindowController(
-            settings: settings,
-            player: player,
-            themes: themes,
-            artworkProvider: artworkProvider
-        )
         let connection = PlaybackConnectionCoordinator(
             settings: settings,
             player: player,
@@ -65,11 +59,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // against Jellyfin (the privileged non-loopback built-in).
         let registry = SourceRegistry.loadingFromDisk()
         self.registry = registry
-        self.arbiter = SourceArbiter(
+        let arbiter = SourceArbiter(
             settings: settings,
             player: player,
             coordinator: connection,
             registry: registry
+        )
+        self.arbiter = arbiter
+        // Built after registry/arbiter so both can be handed into the overlay's
+        // SwiftUI environment (the cover art's right-click context menu).
+        self.windowController = OverlayWindowController(
+            settings: settings,
+            player: player,
+            themes: themes,
+            artworkProvider: artworkProvider,
+            registry: registry,
+            arbiter: arbiter
         )
         super.init()
         // Tell macOS not to restore Settings between launches. Without this,
@@ -117,6 +122,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         windowController.createWindow()
+        // A forced source pin (Settings > Source > Jellyfin/YouTube/…) is a
+        // session-only override — always start fresh in Automatic so a
+        // relaunch doesn't inherit a stale pin from last time.
+        settings.sourceSelection = .auto
         arbiter.activate()
         windowController.startObserving()
         activateMediaCenter()

@@ -25,6 +25,8 @@ struct ArtworkView: View {
 
     @Environment(ArtworkCacheProvider.self) private var provider
     @Environment(SettingsStore.self) private var settings
+    @Environment(SourceRegistry.self) private var registry
+    @Environment(SourceArbiter.self) private var arbiter
     @State private var image: NSImage?
     @State private var isLoading: Bool = false
 
@@ -87,6 +89,9 @@ struct ArtworkView: View {
             } else if let url = settings.baseURL {
                 ClientLauncher.openJellyfin(url)
             }
+        }
+        .contextMenu {
+            AppMenuContent(settings: settings, registry: registry, arbiter: arbiter)
         }
         .task(id: LoadKey(itemId: itemId, tag: imageTag, url: artworkURL, cacheReady: provider.cache != nil)) {
             await loadImage()
