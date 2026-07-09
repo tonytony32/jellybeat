@@ -16,6 +16,11 @@ final class OverlayWindowController: NSObject {
     private let player: PlayerStore
     private let themes: ThemeRegistry
     private let artworkProvider: ArtworkCacheProvider
+    /// Handed down into the overlay's SwiftUI environment so the cover art's
+    /// right-click context menu (`AppMenuContent`) can read them, mirroring
+    /// what the menu-bar item already gets via `AppDelegate`.
+    private let registry: SourceRegistry
+    private let arbiter: SourceArbiter
 
     /// Invoked when a window event implies the feed should pause (miniaturise,
     /// close). The string is a human-readable reason for logging.
@@ -69,12 +74,16 @@ final class OverlayWindowController: NSObject {
         settings: SettingsStore,
         player: PlayerStore,
         themes: ThemeRegistry,
-        artworkProvider: ArtworkCacheProvider
+        artworkProvider: ArtworkCacheProvider,
+        registry: SourceRegistry,
+        arbiter: SourceArbiter
     ) {
         self.settings = settings
         self.player = player
         self.themes = themes
         self.artworkProvider = artworkProvider
+        self.registry = registry
+        self.arbiter = arbiter
         super.init()
     }
 
@@ -160,6 +169,8 @@ final class OverlayWindowController: NSObject {
                 .environment(artworkProvider)
                 .environment(snapState)
                 .environment(queueChrome)
+                .environment(registry)
+                .environment(arbiter)
         )
         hosting.autoresizingMask = [.width, .height]
         hosting.frame = contentRect
