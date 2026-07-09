@@ -191,4 +191,4 @@ under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
 
 ## License
 
-GNU Affero General Public License v3.0 (AGPL-3.0). See [`LICENSE`](LICENSE).
+Mozilla Public License 2.0 (MPL 2.0). See [`LICENSE`](LICENSE).
