@@ -27,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let connection: PlaybackConnectionCoordinator
     private var mediaCenter: MediaCenterController?
     private var phoneCallMonitor: PhoneCallMonitor?
+    private var bridgeSelfHealTask: Task<Void, Never>?
 
     override init() {
         // The hosted unit-test runner launches this app as its test host, so
@@ -142,6 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             YouTubeBridgeHost.start()
         }
         trackBridgeEnabled()
+        startBridgeSelfHeal()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -152,6 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         arbiter.shutdown()
         windowController.shutdown()
+        bridgeSelfHealTask?.cancel()
         // Take the bridge host down with us (it also self-quits when it sees us go).
         YouTubeBridgeHost.stop()
     }
@@ -199,6 +202,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     YouTubeBridgeHost.stop()
                 }
                 self.trackBridgeEnabled()
+            }
+        }
+    }
+
+    /// `YouTubeBridgeHost.start()` is a one-shot, best-effort launch (`NSWorkspace.openApplication`
+    /// failures are only logged, never surfaced). If that single attempt doesn't land — a transient
+    /// LaunchServices hiccup, or the host dying later while we keep running — nothing retries it, so
+    /// the bridge stays dark for the rest of the session even though JellyBeat looks fine. Re-assert
+    /// on a slow cadence to recover automatically; `start()` no-ops once the host is already running.
+    private func startBridgeSelfHeal() {
+        bridgeSelfHealTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                guard let self, !Task.isCancelled else { return }
+                if self.settings.youtubeBridgeEnabled {
+                    YouTubeBridgeHost.start()
+                }
             }
         }
     }
