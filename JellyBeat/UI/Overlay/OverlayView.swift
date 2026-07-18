@@ -350,14 +350,19 @@ private struct VolumeFeedbackView: View {
     }
 }
 
-/// Ambient idle state: the window shrinks to artwork-size (see
-/// `AppDelegate.applyWindowSizeForCurrentState`) and shows a large pair of
-/// beamed eighth notes (♫) as a launch affordance. The glyph stays visible at all times but at a
-/// subtle, low opacity; hovering brings it to full strength (and the
-/// surrounding glass fades in via `chromeOpacity`). Tapping launches the
-/// configured Jellyfin URL via `NSWorkspace.open`, which on macOS picks the
-/// user's chosen handler — useful when the user has registered a Safari
-/// "Add to Dock" web app for the Jellyfin URL.
+/// Ambient idle state: the window shrinks to a fixed 120×120 — the same for
+/// every theme, regardless of that theme's own artwork size (see
+/// `OverlayWindowController.applyWindowSizeForCurrentState`) — and shows a
+/// large pair of beamed eighth notes (♫) as a launch affordance. The glyph
+/// stays visible at all times but at a subtle, low opacity; hovering brings it
+/// to full strength (and the surrounding glass fades in via `chromeOpacity`).
+/// Tapping launches the configured Jellyfin URL via `NSWorkspace.open`, which
+/// on macOS picks the user's chosen handler — useful when the user has
+/// registered a Safari "Add to Dock" web app for the Jellyfin URL.
+///
+/// That 120×120 is a hard budget for anything added here: `TransientToastView`
+/// renders in this same window, so copy long enough to wrap past two lines
+/// covers the glyph it is explaining.
 ///
 /// When the Jellyfin link is down (`linkIsDown`) the affordance changes
 /// meaning: the notes become a `wifi.slash` glyph and the tap explains why
@@ -373,9 +378,10 @@ private struct NothingPlayingView: View {
 
     var body: some View {
         GeometryReader { geo in
-            // Scale the logo to the ambient window so it reads as "a bigger
-            // icon" across themes whose artwork sizes differ (Classic 120 →
-            // Standard/Aero ~256).
+            // Half the ambient window, so the glyph reads as "a bigger icon".
+            // In practice that is always 60: the ambient window is a fixed
+            // 120×120 for every theme. Derived from the geometry rather than
+            // hardcoded so the glyph follows if that footprint ever changes.
             let side = min(geo.size.width, geo.size.height) * 0.5
             let snapped = snapState.alignment != .center
 
