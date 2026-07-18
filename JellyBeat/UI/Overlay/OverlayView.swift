@@ -48,6 +48,18 @@ struct OverlayView: View {
     /// and the badge that `content` lays over the *shared* track view, which
     /// has to stay a single view across the connected/reconnecting boundary so
     /// its inner state survives the transition.
+    /// True when the Jellyfin link itself is down, read from the *ungated*
+    /// health signal. `connectionState` can't answer this: a loopback source
+    /// (YouTube) pins it to `.connected` while it drives, which is exactly the
+    /// case where the ambient overlay would otherwise offer to launch a web app
+    /// against an unreachable server.
+    private var jellyfinLinkIsDown: Bool {
+        switch player.jellyfinLinkHealth {
+        case .reconnecting, .error: return true
+        case .idle, .connecting, .connected: return false
+        }
+    }
+
     private var reconnectingIsOffline: Bool? {
         if case .reconnecting(let isOffline) = player.connectionState { return isOffline }
         return nil
@@ -167,8 +179,12 @@ struct OverlayView: View {
             } else {
                 NothingPlayingView(
                     launchURL: settings.baseURL,
+                    linkIsDown: jellyfinLinkIsDown,
                     isHovering: $ambientHover,
-                    onLaunch: { player.markAnticipating() }
+                    onLaunch: { player.markAnticipating() },
+                    onUnreachable: {
+                        player.showTransient("Can't reach your Jellyfin server from this network.")
+                    }
                 )
             }
         }
@@ -341,10 +357,17 @@ private struct VolumeFeedbackView: View {
 /// configured Jellyfin URL via `NSWorkspace.open`, which on macOS picks the
 /// user's chosen handler — useful when the user has registered a Safari
 /// "Add to Dock" web app for the Jellyfin URL.
+///
+/// When the Jellyfin link is down (`linkIsDown`) the affordance changes
+/// meaning: the notes become a `wifi.slash` glyph and the tap explains why
+/// nothing can start instead of opening a web app against a server this
+/// network can't reach.
 private struct NothingPlayingView: View {
     let launchURL: URL?
+    let linkIsDown: Bool
     @Binding var isHovering: Bool
     let onLaunch: () -> Void
+    let onUnreachable: () -> Void
     @Environment(WindowSnapState.self) private var snapState
 
     var body: some View {
@@ -358,20 +381,34 @@ private struct NothingPlayingView: View {
             ZStack(alignment: snapState.alignment) {
                 Color.clear.contentShape(Rectangle())
 
-                Image("AmbientNotes")
-                    .renderingMode(.template)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: side, height: side)
-                    .foregroundStyle(.secondary)
-                    .opacity(isHovering ? 0.95 : 0.35)
-                    .scaleEffect(isHovering ? 1.0 : 0.97)
-                    .padding(snapped ? 8 : 0)
+                Group {
+                    if linkIsDown {
+                        Image(systemName: "wifi.slash")
+                            .resizable()
+                            .scaledToFit()
+                            .fontWeight(.light)
+                            .frame(width: side * 0.8, height: side * 0.8)
+                    } else {
+                        Image("AmbientNotes")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: side, height: side)
+                    }
+                }
+                .foregroundStyle(.secondary)
+                .opacity(isHovering ? 0.95 : 0.35)
+                .scaleEffect(isHovering ? 1.0 : 0.97)
+                .padding(snapped ? 8 : 0)
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
         .onHover { isHovering = $0 }
         .onTapGesture {
+            // Off the home network the launch would open a blank web app and
+            // markAnticipating() would hold the chrome up for 30 s waiting on
+            // music that can't arrive. Say why instead.
+            guard !linkIsDown else { onUnreachable(); return }
             if let launchURL {
                 ClientLauncher.openJellyfin(launchURL)
                 onLaunch()
