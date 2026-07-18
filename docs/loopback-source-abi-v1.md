@@ -12,7 +12,7 @@ vendor-neutral and frozen. The consumer side lives in
 [`architecture.md`](architecture.md) §3/§5/§10 for how sources are arbitrated.
 
 > Status: **phase 1**. Discovery, the wire format, and the manifest are stable.
-> Authentication is intentionally absent in phase 1 (see §7); an optional token
+> Authentication is intentionally absent in phase 1 (see §8); an optional token
 > is *reserved* so it can be added without a major bump.
 
 ---
@@ -44,7 +44,7 @@ vendor-neutral and frozen. The consumer side lives in
 ```jsonc
 {
   "abi": "loopback-source/1",      // optional in v1
-  "sourceName": "YouTube",         // optional; diagnostics only, NOT the menu label (§7)
+  "sourceName": "YouTube",         // optional; diagnostics only, NOT the menu label (§8)
   "capabilities": {
     "canPlayPause": true, "canNext": true, "canPrevious": true,
     "canSeek": true, "canSetVolume": true,
@@ -72,12 +72,12 @@ vendor-neutral and frozen. The consumer side lives in
   "active": true,                 // false ⇒ idle (see below)
   "source": "youtube_music",      // string | null, diagnostics only
   "state": "playing",             // "playing" | "paused" | null
-  "title": "…", "artist": "…", "album": "…",   // string | null, UNTRUSTED (§7)
+  "title": "…", "artist": "…", "album": "…",   // string | null, UNTRUSTED (§8)
   "durationSec": 240,             // number | null  (null ⇒ unknown / livestream)
   "positionSec": 30,              // number | null
   "volume": 0.8,                  // 0.0–1.0 | null
   "itemId": "abc123",             // string | null, stable identity for this item
-  "artworkUrl": "https://…",      // string | null, UNTRUSTED; http/https only (§7)
+  "artworkUrl": "https://…",      // string | null, UNTRUSTED; http/https only (§8)
   "liked": false,                 // bool | null, "like" state; null/absent ⇒ false
   "updatedAtMs": 1700000000000    // number | null
 }
@@ -137,7 +137,7 @@ Everything else (a JSON decode failure from schema drift, or an unexpected
 status) is **logged** but still surfaced to the UI as idle, so a breaking change
 is debuggable instead of an invisible permanent "idle".
 
-### 6.1 Staleness and pauses
+## 7. Staleness and pauses
 
 Idle (§6) is about a source that isn't *there*. This is about a source that is
 there but hasn't **spoken recently** — and getting it wrong makes the overlay
@@ -171,7 +171,7 @@ they let a source be honest about the gap instead of flipping to idle.
 
 [ytbridge]: https://github.com/tonytony32/yt-safari-bridge.git
 
-## 7. Security & trust
+## 8. Security & trust
 
 Phase-1 posture, stated plainly so plugin authors and users know exactly what is
 and isn't guaranteed.
@@ -203,7 +203,7 @@ and isn't guaranteed.
   to harden against same-user squatters / browser-origin POSTs. The field name
   is reserved here so it can be added compatibly.
 
-## 8. Discovery & manifest
+## 9. Discovery & manifest
 
 JellyBeat scans **once at launch** (no hot-reload in phase 1; adding a source
 needs a relaunch):
@@ -221,7 +221,7 @@ greppability) describing one source:
   "id": "com.example.spotify-bridge",  // required; reverse-DNS recommended.
                                        //   [a-z0-9._-], ≤128 chars. Becomes the
                                        //   stable source id + persistence key.
-  "displayName": "Spotify",            // required; the TRUSTED menu label (§7)
+  "displayName": "Spotify",            // required; the TRUSTED menu label (§8)
   "port": 8980,                        // required; 1024–65535
   "pathPrefix": "/v1",                 // optional; default "/v1"
   "homeRank": 100,                     // optional; lower = more "home" (fallback
@@ -248,7 +248,7 @@ greppability) describing one source:
 
 ### Adding a source (third party)
 
-1. Run a local process that implements §3–§6 on a `127.0.0.1` port.
+1. Run a local process that implements §3–§7 on a `127.0.0.1` port.
 2. Drop a `*.jellysource` manifest (above) into the Sources directory.
 3. Relaunch JellyBeat. The source appears in the menu-bar **Source** picker and
    is arbitrated automatically.

@@ -85,7 +85,7 @@ Contract essentials (frozen from YouTube's behavior):
 - `POST {prefix}/command` ← transport commands (`PlaybackCommanding`).
 - Every string field is **untrusted page content**; artwork URLs are
   scheme-restricted to `http`/`https`. The port is unauthenticated, an accepted
-  residual risk (ABI doc §7).
+  residual risk (ABI doc §8).
 
 ## 4. The command sink (`PlaybackCommanding`)
 
