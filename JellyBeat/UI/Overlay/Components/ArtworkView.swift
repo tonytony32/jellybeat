@@ -49,6 +49,16 @@ struct ArtworkView: View {
         return URLSession(configuration: config)
     }()
 
+    /// Delays between attempts at a direct-URL cover (so: three tries total).
+    ///
+    /// Without a retry, one transient failure is permanent. A direct-URL cover
+    /// is cached nowhere — unlike Jellyfin's, which `ArtworkCache` keeps on
+    /// disk — and `LoadKey` doesn't change while a track sits still, so nothing
+    /// would ever re-run the load. A cover lost to a blip (the tab closing
+    /// mid-fetch, a moment offline) would stay missing for as long as that
+    /// track is on screen.
+    private static let directFetchBackoff: [TimeInterval] = [0.5, 1.5]
+
     var body: some View {
         ZStack {
             if let image {
@@ -121,16 +131,54 @@ struct ArtworkView: View {
         // untrusted URL can't turn this into a local-file read.
         if let artworkURL {
             let scheme = artworkURL.scheme?.lowercased()
-            if scheme == "http" || scheme == "https",
-               let data = try? await Self.directSession.data(from: artworkURL).0 {
-                image = NSImage(data: data)
+            guard scheme == "http" || scheme == "https" else {
+                image = nil
+                return
             }
+            let loaded = await Self.retryingFetch(backoff: Self.directFetchBackoff) {
+                guard let data = try? await Self.directSession.data(from: artworkURL).0 else {
+                    return nil
+                }
+                return NSImage(data: data)
+            }
+            // A cancelled load belongs to a track we've already moved off;
+            // let the newer load own the frame rather than clobbering it.
+            guard !Task.isCancelled else { return }
+            image = loaded
             return
         }
 
+        // No cache wired yet — launch, or a server reconfigure in flight. That
+        // is not an answer about *this item*, so leave whatever is on screen
+        // alone; `LoadKey.cacheReady` re-runs the load once the cache arrives.
         guard let cache = provider.cache else { return }
-        if let data = await cache.data(forItemId: itemId, tag: imageTag) {
-            image = NSImage(data: data)
+        let data = await cache.data(forItemId: itemId, tag: imageTag)
+        guard !Task.isCancelled else { return }
+        // Assign unconditionally, including nil: an item with no cover has to
+        // clear the previous one. The view's identity is deliberately held
+        // across track changes (see `OverlayView.content`) so the cross-fade
+        // works, which means anything left here shows up under the *next*
+        // track's metadata.
+        image = data.flatMap { NSImage(data: $0) }
+    }
+
+    /// Run `fetch` until it yields an image, waiting out `backoff` between
+    /// attempts (`backoff.count + 1` tries in total). Returns nil once they're
+    /// exhausted — a definitive "no cover", which the caller applies.
+    ///
+    /// Static and closure-driven so the retry policy is exercisable in tests
+    /// without a live `URLSession` or a hosted view.
+    static func retryingFetch(
+        backoff: [TimeInterval],
+        fetch: () async -> NSImage?
+    ) async -> NSImage? {
+        for attempt in 0...backoff.count {
+            if attempt > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(backoff[attempt - 1] * 1_000_000_000))
+                if Task.isCancelled { return nil }
+            }
+            if let loaded = await fetch() { return loaded }
         }
+        return nil
     }
 }

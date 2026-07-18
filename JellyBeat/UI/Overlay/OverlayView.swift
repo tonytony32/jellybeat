@@ -44,6 +44,15 @@ struct OverlayView: View {
         return (ambientHover || player.anticipating) ? 1.0 : 0.0
     }
 
+    /// `isOffline` while the link is down, `nil` while it's up. Drives the dim
+    /// and the badge that `content` lays over the *shared* track view, which
+    /// has to stay a single view across the connected/reconnecting boundary so
+    /// its inner state survives the transition.
+    private var reconnectingIsOffline: Bool? {
+        if case .reconnecting(let isOffline) = player.connectionState { return isOffline }
+        return nil
+    }
+
     var body: some View {
         ZStack {
             // Full-window hit-catching surface. The themes that float over the
@@ -121,24 +130,9 @@ struct OverlayView: View {
             IdleStateView(openSettings: openSettings)
         case .error(let message):
             ErrorStateView(message: message, openSettings: openSettings)
-        case .reconnecting(let isOffline):
-            if let track = player.currentTrack {
-                // Keep the last track on screen for continuity, but dimmed and
-                // topped with a quiet badge so it reads as "paused link, not a
-                // crash". Controls are gated in PlayerStore, so a press here
-                // just surfaces the reconnecting hint.
-                themes.current.body(track: track, store: player)
-                    .id(themes.current.id)
-                    .opacity(0.4)
-                    .overlay(alignment: .top) {
-                        ReconnectingBadge(isOffline: isOffline)
-                            .padding(.top, 8)
-                    }
-                    .transition(.opacity)
-            } else {
-                ReconnectingStateView(isOffline: isOffline)
-            }
-        case .connecting, .connected:
+        case .reconnecting(let isOffline) where player.currentTrack == nil:
+            ReconnectingStateView(isOffline: isOffline)
+        case .connecting, .connected, .reconnecting:
             if let track = player.currentTrack {
                 themes.current.body(track: track, store: player)
                     // Anchor identity on the theme only. We deliberately do
@@ -150,6 +144,25 @@ struct OverlayView: View {
                     // on theme change so the inner state resets cleanly when
                     // the layout changes.
                     .id(themes.current.id)
+                    // Reconnecting keeps the last track on screen for
+                    // continuity, dimmed and topped with a quiet badge so it
+                    // reads as "paused link, not a crash". Controls are gated
+                    // in PlayerStore, so a press here just surfaces the hint.
+                    //
+                    // It renders as the SAME view, dimmed — NOT as its own
+                    // switch branch. A branch of its own gives it a distinct
+                    // structural identity (`.id()` does not bridge across
+                    // conditional branches), so entering and leaving
+                    // `.reconnecting` tore the theme body down and back up,
+                    // resetting ArtworkView's `@State` and dropping the cover
+                    // of a track that never stopped playing.
+                    .opacity(reconnectingIsOffline == nil ? 1 : 0.4)
+                    .overlay(alignment: .top) {
+                        if let isOffline = reconnectingIsOffline {
+                            ReconnectingBadge(isOffline: isOffline)
+                                .padding(.top, 8)
+                        }
+                    }
                     .transition(.opacity)
             } else {
                 NothingPlayingView(
