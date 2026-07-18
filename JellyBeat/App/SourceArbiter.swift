@@ -21,7 +21,8 @@ import os
 /// the overlay sticks to the current source while it still has a (paused) session,
 /// only falling back to the registry's `homePriority` (Jellyfin, the home source)
 /// once the current source goes fully idle. With nothing active at all, the
-/// current source stays put.
+/// overlay likewise returns home, so Jellyfin's gate reopens and its real
+/// transport state shows.
 @MainActor
 @Observable
 final class SourceArbiter {
@@ -223,7 +224,8 @@ final class SourceArbiter {
     ///    goes fully idle (stopped / closed) do we reveal the first source in
     ///    `homePriority` that has a session — so *stopping* the active source still
     ///    surfaces the home source.
-    /// 5. With nothing active anywhere, the current source stays put.
+    /// 5. With nothing active anywhere, fall back to the first source in
+    ///    `homePriority` — never park on a dead source (see the return site).
     static func decide(
         selection: SourceSelection,
         presence: [SourceID: SourcePresence],
@@ -261,8 +263,16 @@ final class SourceArbiter {
         for kind in homePriority where presence[kind]?.active == true {
             return kind
         }
-        // Nothing active anywhere → keep the current source (no spurious flip).
-        return current
+        // Nothing active anywhere → return home (`homePriority` first) rather
+        // than holding the current source. Parking on a dead loopback source
+        // kept `jellyfinIsActiveSource` false until a relaunch, muting
+        // Jellyfin's real `.reconnecting`/`.error` states behind a stale
+        // ambient `.connected` (quit Safari away from home → the overlay lies
+        // "connected"). Going home reopens the gate so the overlay reports the
+        // home transport's truth: real ambient when reachable, offline when
+        // not. A merely-paused source never lands here — it is still `active`,
+        // so the sticky-pause rule above keeps it.
+        return homePriority.first ?? current
     }
 
     /// Position of `kind` in `order`, or `.max` when absent (sorts last).
