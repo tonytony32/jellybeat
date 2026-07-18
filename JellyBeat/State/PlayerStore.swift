@@ -229,6 +229,17 @@ final class PlayerStore {
     /// to fill; far above it the collapse stops reading as a consequence of
     /// having stopped playback.
     static let defaultIdleCollapseGrace: TimeInterval = 8
+    /// The same absolute deadline, but for a track that was *paused* when the
+    /// reports went silent.
+    ///
+    /// A pause doesn't stop existing because nobody is talking about it. The
+    /// YouTube bridge intermittently reports `{active:false}` for a paused
+    /// Safari tab that macOS has throttled in the background, so the short
+    /// grace turned a live pause into "nothing" and the overlay flickered
+    /// cover↔ambient every ~30 s. Long enough to outlast that throttling by a
+    /// wide margin, still bounded so a tab closed while paused eventually
+    /// collapses instead of stranding a track for the session.
+    static let defaultPausedIdleCollapseGrace: TimeInterval = 600
     private static let selectedSessionKey = "playerStore.selectedSessionId"
 
     /// Injected so the hosted test runner reads/writes a throwaway suite rather
@@ -237,13 +248,16 @@ final class PlayerStore {
     /// Injected so tests can exercise the collapse without sleeping for the
     /// real grace period. Production takes `defaultIdleCollapseGrace`.
     private let idleCollapseGrace: TimeInterval
+    private let pausedIdleCollapseGrace: TimeInterval
 
     init(
         defaults: UserDefaults = .standard,
-        idleCollapseGrace: TimeInterval = PlayerStore.defaultIdleCollapseGrace
+        idleCollapseGrace: TimeInterval = PlayerStore.defaultIdleCollapseGrace,
+        pausedIdleCollapseGrace: TimeInterval = PlayerStore.defaultPausedIdleCollapseGrace
     ) {
         self.defaults = defaults
         self.idleCollapseGrace = idleCollapseGrace
+        self.pausedIdleCollapseGrace = pausedIdleCollapseGrace
         self.selectedSessionId = defaults.string(forKey: Self.selectedSessionKey)
     }
 
@@ -286,9 +300,16 @@ final class PlayerStore {
         // Optimistic-update protection: if a command was issued in the last
         // 1.5 s, ignore the poll's `isPaused` so the local optimistic toggle
         // stays put until the server has confirmed.
+        // An idle report arriving while we still hold a track carries no opinion
+        // worth having: the source is saying "nothing", not "playing". Letting
+        // it write `isPaused = false` would both flip the transport button under
+        // a track that is really paused and erase the state the grace below
+        // reads to size itself.
         if let lastCommandAt,
            Date().timeIntervalSince(lastCommandAt) < Self.optimisticPlayPauseWindow {
             // skip
+        } else if track == nil, currentTrack != nil {
+            // skip — the last visible state stands until the collapse fires
         } else if self.isPaused != isPaused {
             self.isPaused = isPaused
         }
@@ -350,7 +371,10 @@ final class PlayerStore {
             // indefinitely: sources report "nothing playing" faster than the
             // grace period, so each one reset a timer that then never fired.
             // Resuming playback is what cancels it, in the branch above.
-            let grace = UInt64(idleCollapseGrace * 1_000_000_000)
+            // Asymmetric by what was last on screen: 8 s says "it was playing
+            // and it's gone", which a paused track has not done.
+            let seconds = self.isPaused ? pausedIdleCollapseGrace : idleCollapseGrace
+            let grace = UInt64(seconds * 1_000_000_000)
             clearTrackTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: grace)
                 guard !Task.isCancelled else { return }
