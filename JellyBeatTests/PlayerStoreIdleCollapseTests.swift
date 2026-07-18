@@ -15,9 +15,16 @@ struct PlayerStoreIdleCollapseTests {
     /// Short enough to keep the suite fast, long enough that the scheduling
     /// jitter of a loaded machine can't reorder the assertions below.
     private static let grace: TimeInterval = 0.6
+    /// Stands in for the 10 min production value: several times `grace`, so a
+    /// "hasn't collapsed yet" assertion past the short deadline is meaningful,
+    /// but still short enough to wait out in a test.
+    private static let pausedGrace: TimeInterval = 2.4
 
     private func makeStore() -> PlayerStore {
-        PlayerStore(idleCollapseGrace: Self.grace)
+        PlayerStore(
+            idleCollapseGrace: Self.grace,
+            pausedIdleCollapseGrace: Self.pausedGrace
+        )
     }
 
     private func track(id: String) -> TrackSnapshot {
@@ -138,5 +145,59 @@ struct PlayerStoreIdleCollapseTests {
         // have wiped "b" by now.
         await wait(Self.grace + 0.3)
         #expect(store.currentTrack?.itemId == "b")
+    }
+
+    // MARK: - Asymmetric grace
+
+    /// The YouTube regression. A paused Safari tab that macOS throttles in the
+    /// background makes the bridge report `{active:false}` intermittently, so a
+    /// live pause arrives as "nothing playing". That must not collapse on the
+    /// short grace — the overlay flickered cover↔ambient every ~30 s. A pause
+    /// only ends when the user ends it.
+    @Test
+    func pausedThenSilenceSurvivesTheShortGrace() async {
+        let store = makeStore()
+        publish(store, track: track(id: "a"), isPaused: true)
+        #expect(store.isPaused == true)
+
+        publish(store, track: nil)
+        for _ in 0..<3 {
+            await wait(0.15)
+            publish(store, track: nil)
+        }
+        await wait(Self.grace)
+
+        // Well past the playing deadline, and the paused one is still far off.
+        #expect(store.currentTrack?.itemId == "a")
+        // The transport still reads "paused", so the button offers resume.
+        #expect(store.isPaused == true)
+    }
+
+    /// The other half of the asymmetry, stated directly: silence after actual
+    /// playback still means "it stopped", and still collapses on 8 s.
+    @Test
+    func playingThenSilenceCollapsesOnTheShortGrace() async {
+        let store = makeStore()
+        publish(store, track: track(id: "a"), isPaused: false)
+
+        publish(store, track: nil)
+        await wait(Self.grace + 0.3)
+
+        #expect(store.currentTrack == nil)
+    }
+
+    /// The long grace is a deadline, not an exemption: a tab closed while
+    /// paused reports nothing forever, and the overlay must eventually shrink
+    /// to the ambient note rather than stranding a dead track for the session.
+    @Test
+    func pausedThenSilenceCollapsesOnTheLongGrace() async {
+        let store = makeStore()
+        publish(store, track: track(id: "a"), isPaused: true)
+
+        publish(store, track: nil)
+        await wait(Self.pausedGrace + 0.4)
+
+        #expect(store.currentTrack == nil)
+        #expect(store.queue.isEmpty)
     }
 }
