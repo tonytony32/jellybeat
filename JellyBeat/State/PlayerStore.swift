@@ -152,6 +152,22 @@ final class PlayerStore {
     /// (playing OR paused).
     private(set) var jellyfinHasNowPlaying: Bool = false
 
+    /// Health of the Jellyfin link itself, refreshed on every `updateConnection`
+    /// and every `ingest` regardless of gating. `connectionState` is the *shared*
+    /// overlay state, which a loopback source pins to `.connected` while it
+    /// drives — so it says nothing about whether the home server is reachable.
+    /// The ambient view reads this to avoid showing an "all good" face (and
+    /// offering to open the web app) from a network that can't reach home.
+    private(set) var jellyfinLinkHealth: ConnectionState = .idle
+
+    /// True when the Jellyfin link is known to be down — retrying or hard-failed.
+    var jellyfinLinkIsDown: Bool {
+        switch jellyfinLinkHealth {
+        case .reconnecting, .error: return true
+        case .idle, .connecting, .connected: return false
+        }
+    }
+
     /// Stronger signal for the arbiter: true when Jellyfin has a now-playing item
     /// AND it is actually playing (not paused). Lets the arbiter prefer a source
     /// that is genuinely playing over one merely parked/paused.
@@ -389,6 +405,9 @@ final class PlayerStore {
     /// Convenience for transient lifecycle states (connecting, reconnecting,
     /// errors) that do not carry a snapshot.
     func updateConnection(_ state: ConnectionState) {
+        // Ungated, like the presence signals below: the link's health is a fact
+        // about the Jellyfin transport, not about who owns the overlay.
+        jellyfinLinkHealth = state
         // Dropped while YouTube is driving: the Jellyfin transport keeps
         // running for presence, but its lifecycle blips (a reconnecting tick,
         // an idle reset) must not repaint the overlay the YouTube feed owns.
@@ -488,6 +507,8 @@ final class PlayerStore {
         // drives.
         jellyfinHasNowPlaying = snapshot != nil
         jellyfinIsPlaying = snapshot != nil && !pausedFromServer
+        // A poll that produced sessions means the server answered.
+        jellyfinLinkHealth = .connected
         onJellyfinUpdate?()
 
         // Gated: YouTube is the active source, so don't let Jellyfin write the

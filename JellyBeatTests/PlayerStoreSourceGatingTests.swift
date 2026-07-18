@@ -98,4 +98,34 @@ struct PlayerStoreSourceGatingTests {
         #expect(store.currentTrack?.itemId == "yt-video")
         #expect(store.isLinkLive)
     }
+
+    /// The gate protects the *shared* overlay state, not the link-health signal:
+    /// while YouTube drives, `connectionState` stays `.connected`, but the
+    /// ambient view still needs to know the home server went away.
+    @Test
+    func gatedWritesStillUpdateLinkHealth() {
+        let store = PlayerStore()
+        store.capabilities = .loopbackDefault
+        store.jellyfinIsActiveSource = false
+        store.applyExternalSnapshot(
+            track: ytTrack(), isPaused: false, volume: 70, connection: .connected
+        )
+
+        // A gated ingest that reached the server marks the link healthy.
+        store.ingest(sessions: [playingSession()], userId: Self.userId)
+        #expect(store.jellyfinLinkHealth == .connected)
+        #expect(store.jellyfinLinkIsDown == false)
+
+        // A gated lifecycle blip is dropped from the overlay but not from health.
+        store.updateConnection(.reconnecting(isOffline: true))
+        #expect(store.isLinkLive)                    // shared state untouched
+        #expect(store.jellyfinLinkHealth == .reconnecting(isOffline: true))
+        #expect(store.jellyfinLinkIsDown)
+
+        // A hard failure counts as down too, and healing clears it.
+        store.updateConnection(.error("nope"))
+        #expect(store.jellyfinLinkIsDown)
+        store.updateConnection(.connected)
+        #expect(store.jellyfinLinkIsDown == false)
+    }
 }

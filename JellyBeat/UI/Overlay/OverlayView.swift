@@ -167,8 +167,14 @@ struct OverlayView: View {
             } else {
                 NothingPlayingView(
                     launchURL: settings.baseURL,
+                    linkIsDown: player.jellyfinLinkIsDown,
                     isHovering: $ambientHover,
-                    onLaunch: { player.markAnticipating() }
+                    onLaunch: { player.markAnticipating() },
+                    onUnreachable: {
+                        player.showTransient(
+                            "Can't reach your Jellyfin server from this network."
+                        )
+                    }
                 )
             }
         }
@@ -343,8 +349,13 @@ private struct VolumeFeedbackView: View {
 /// "Add to Dock" web app for the Jellyfin URL.
 private struct NothingPlayingView: View {
     let launchURL: URL?
+    /// The *home* link is unreachable (a loopback source may still be driving,
+    /// which is why `connectionState` can't answer this). The ambient face
+    /// changes and the tap stops offering to open an unreachable web app.
+    let linkIsDown: Bool
     @Binding var isHovering: Bool
     let onLaunch: () -> Void
+    let onUnreachable: () -> Void
     @Environment(WindowSnapState.self) private var snapState
 
     var body: some View {
@@ -358,20 +369,42 @@ private struct NothingPlayingView: View {
             ZStack(alignment: snapState.alignment) {
                 Color.clear.contentShape(Rectangle())
 
-                Image("AmbientNotes")
-                    .renderingMode(.template)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: side, height: side)
-                    .foregroundStyle(.secondary)
-                    .opacity(isHovering ? 0.95 : 0.35)
-                    .scaleEffect(isHovering ? 1.0 : 0.97)
-                    .padding(snapped ? 8 : 0)
+                Group {
+                    if linkIsDown {
+                        // Same silhouette, different truth: the note alone reads
+                        // as "nothing playing yet", which is a lie when the
+                        // server simply isn't reachable from here.
+                        VStack(spacing: 6) {
+                            Image(systemName: "wifi.slash")
+                                .font(.system(size: side * 0.5, weight: .light))
+                            Text("Jellyfin unreachable")
+                                .font(.caption2)
+                                .multilineTextAlignment(.center)
+                        }
+                    } else {
+                        Image("AmbientNotes")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: side, height: side)
+                    }
+                }
+                .foregroundStyle(.secondary)
+                .opacity(isHovering ? 0.95 : 0.35)
+                .scaleEffect(isHovering ? 1.0 : 0.97)
+                .padding(snapped ? 8 : 0)
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
         .onHover { isHovering = $0 }
         .onTapGesture {
+            // Launching the web app against an unreachable base URL just opens a
+            // blank Safari window, and `onLaunch` would then hold the chrome
+            // open for 30 s waiting for music that can't arrive. Say why instead.
+            guard !linkIsDown else {
+                onUnreachable()
+                return
+            }
             if let launchURL {
                 ClientLauncher.openJellyfin(launchURL)
                 onLaunch()
