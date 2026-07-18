@@ -44,10 +44,6 @@ struct OverlayView: View {
         return (ambientHover || player.anticipating) ? 1.0 : 0.0
     }
 
-    /// `isOffline` while the link is down, `nil` while it's up. Drives the dim
-    /// and the badge that `content` lays over the *shared* track view, which
-    /// has to stay a single view across the connected/reconnecting boundary so
-    /// its inner state survives the transition.
     /// True when the Jellyfin link itself is down, read from the *ungated*
     /// health signal. `connectionState` can't answer this: a loopback source
     /// (YouTube) pins it to `.connected` while it drives, which is exactly the
@@ -60,6 +56,10 @@ struct OverlayView: View {
         }
     }
 
+    /// `isOffline` while the link is down, `nil` while it's up. Drives the dim
+    /// and the badge that `content` lays over the *shared* track view, which
+    /// has to stay a single view across the connected/reconnecting boundary so
+    /// its inner state survives the transition.
     private var reconnectingIsOffline: Bool? {
         if case .reconnecting(let isOffline) = player.connectionState { return isOffline }
         return nil
