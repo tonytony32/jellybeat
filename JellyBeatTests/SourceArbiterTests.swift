@@ -69,7 +69,8 @@ struct SourceArbiterTests {
     /// The decision policy hand-written as a flat two-source spec, kept as an
     /// independent oracle so `decideMatchesReferencePolicy` can prove the generalized
     /// N-source core is a faithful two-source projection of it. Mirrors the current
-    /// policy, including the "sticky pause" none-playing rule.
+    /// policy, including the "sticky pause" none-playing rule and the all-idle
+    /// return-home fallback.
     private static func referenceDecide(
         selection: SourceSelection,
         ytPlaying: Bool, ytActive: Bool,
@@ -87,7 +88,7 @@ struct SourceArbiterTests {
         if currentActive { return current }
         if jfActive { return .jellyfin }   // home fallback (Jellyfin first)
         if ytActive { return .youtube }
-        return current
+        return .jellyfin                   // nothing active anywhere → home
     }
 
     // MARK: - Decision policy
@@ -167,15 +168,41 @@ struct SourceArbiterTests {
         #expect(autoDecide(both, recency: recency(ytNoOlderThanJf: false), current: .youtube) == .jellyfin)
     }
 
-    /// With neither active, the current source is kept (no spurious flip).
+    /// With nothing active anywhere, decide returns home (`homePriority` first)
+    /// rather than keeping the current source — parking on a dead loopback
+    /// source kept Jellyfin gated and its real transport state muted (see
+    /// `allIdleAfterLoopbackReturnsHome` for the full bug replay).
     @Test
-    func autoKeepsCurrentWhenNeitherActive() {
+    func autoReturnsHomeWhenNothingActiveAnywhere() {
         let none = presence(
             yt: SourcePresence(active: false, playing: false),
             jf: SourcePresence(active: false, playing: false)
         )
-        #expect(autoDecide(none, current: .youtube) == .youtube)
+        #expect(autoDecide(none, current: .youtube) == .jellyfin)
         #expect(autoDecide(none, current: .jellyfin) == .jellyfin)
+    }
+
+    /// THE bug replay: YouTube was driving, then EVERYTHING goes idle (e.g.
+    /// Safari quit away from home). decide must hand the overlay back to
+    /// Jellyfin — reopening the gate so `.reconnecting`/`.error` resurface
+    /// ("You're offline" away, true ambient at home) — instead of parking on
+    /// the dead loopback source until a relaunch.
+    @Test
+    func allIdleAfterLoopbackReturnsHome() {
+        var r = ActivationRecency()
+        observe(&r, yt: true, jf: false)     // user starts YouTube → it drives
+        #expect(autoDecide(
+            presence(yt: SourcePresence(active: true, playing: true),
+                     jf: SourcePresence(active: false, playing: false)),
+            recency: r, current: .jellyfin
+        ) == .youtube)
+
+        observe(&r, yt: false, jf: false)    // Safari closed → all idle
+        #expect(autoDecide(
+            presence(yt: SourcePresence(active: false, playing: false),
+                     jf: SourcePresence(active: false, playing: false)),
+            recency: r, current: .youtube
+        ) == .jellyfin)
     }
 
     /// "Sticky pause": with nothing playing, the overlay stays on the current
@@ -713,27 +740,29 @@ struct SourceArbiterIntegrationTests {
         tearDown(env)
     }
 
-    /// The arbiter feeds its own `activeKind` as `decide`'s `current`, so with
-    /// nothing active the overlay holds the source it is already on rather than
-    /// snapping home. Pin YouTube, drop to `auto`, then drive a `reevaluate`
-    /// (empty Jellyfin ingest) with no source active: YouTube must be held. A
-    /// mis-wired `current` (e.g. a hardcoded `.jellyfin`) would flip to Jellyfin
-    /// here — swapping the sink and ungating Jellyfin — so the capability and
-    /// gating assertions catch the regression too.
+    /// The all-idle home fallback through the real pipeline: pin YouTube, drop
+    /// to `auto`, then drive a `reevaluate` (empty Jellyfin ingest) with no
+    /// source active anywhere. The overlay must return to Jellyfin — reopening
+    /// the gate (`jellyfinIsActiveSource`) and restoring the Jellyfin
+    /// sink/capabilities — rather than hold the dead loopback source with
+    /// Jellyfin's real transport state muted. The idle current source also
+    /// skips the flip debounce, so the flip lands on the very pass that
+    /// observes all-idle (well inside the 1 s window after activate's flip).
     @Test
-    func autoHoldsCurrentSourceWhenNothingActive() {
+    func autoReturnsHomeWhenNothingActive() {
         let env = makeEnv(selection: .youtube)
         env.arbiter.activate()
         #expect(env.arbiter.activeKind == .youtube)
 
-        // Drop to auto; nothing is playing anywhere (no Jellyfin sessions, the
-        // YouTube feed is idle). decide returns `current`, debounce short-circuits.
+        // Drop to auto; nothing is active anywhere (no Jellyfin sessions, the
+        // YouTube feed is idle). decide falls back to `homePriority` first, and
+        // the debounce lets the flip through immediately (current went idle).
         env.settings.sourceSelection = .auto
         env.player.ingest(sessions: [], userId: Self.userId)
 
-        #expect(env.arbiter.activeKind == .youtube)            // held, not flipped home
-        #expect(env.player.capabilities == .loopbackDefault)   // no flip back to Jellyfin
-        #expect(env.player.jellyfinIsActiveSource == false)
+        #expect(env.arbiter.activeKind == .jellyfin)           // snapped home, not held
+        #expect(env.player.capabilities == .jellyfin)          // Jellyfin sink restored
+        #expect(env.player.jellyfinIsActiveSource == true)     // gate reopened
 
         tearDown(env)
     }

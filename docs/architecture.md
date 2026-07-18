@@ -162,7 +162,7 @@ auto, exactly one playing     → that source
 auto, several playing         → most-recently-ACTIVATED (tie → tiePriority)
 auto, none playing, current active → keep current ("sticky pause")
 auto, none playing, current idle   → first present source in homePriority
-auto, nothing active          → keep current (last source)
+auto, nothing active          → first source in homePriority (home)
 ```
 
 - **Sticky pause, not eager home-reveal.** When nothing is playing, the overlay
@@ -172,6 +172,12 @@ auto, nothing active          → keep current (last source)
   closed) does the overlay defer to `homePriority`. So *pausing* YouTube keeps
   YouTube (even with a long-paused Jellyfin session lingering), while *stopping*
   it still surfaces the parked Jellyfin.
+- **All-idle returns home.** With nothing active anywhere, the overlay falls
+  back to `homePriority` first (Jellyfin) instead of holding the last source.
+  Parking on a dead loopback source kept `jellyfinIsActiveSource` false until a
+  relaunch, muting Jellyfin's real `.reconnecting`/`.error` states behind a
+  stale ambient `.connected`. Going home reopens the gate: true ambient when
+  the server is reachable, "You're offline" when it isn't.
 - **Two explicit priority lists, not one.** `homePriority` (`[.jellyfin,
   .youtube]`) picks the fallback when the current source has gone idle and others
   are still parked: Jellyfin, the "home" source, first. `tiePriority`
