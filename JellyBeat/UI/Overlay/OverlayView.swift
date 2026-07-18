@@ -417,6 +417,12 @@ private struct NothingPlayingView: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(String(localized: "Nothing playing"))
+        .accessibilityAddTraits(launchURL == nil ? [] : .isButton)
+        .accessibilityHint(tapHint)
+        .help(tapHint)
+        .pointerStyle(launchURL == nil ? nil : .link)
         .onHover { isHovering = $0 }
         .onTapGesture {
             if let lastTapAt,
@@ -435,6 +441,17 @@ private struct NothingPlayingView: View {
         }
         .animation(.easeInOut(duration: 0.2), value: isHovering)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: snapState.alignment)
+    }
+
+    /// Tooltip + accessibility hint for the single click, matched to what it
+    /// will actually do. When the link is down the click explains itself rather
+    /// than launching, so the tooltip says that up front instead of promising a
+    /// client that can't be reached.
+    private var tapHint: String {
+        if linkIsDown { return String(localized: "Jellyfin isn't reachable from this network") }
+        return launchURL == nil
+            ? String(localized: "Set a Jellyfin server in Settings to open it from here")
+            : String(localized: "Click to open the Jellyfin client")
     }
 }
 
