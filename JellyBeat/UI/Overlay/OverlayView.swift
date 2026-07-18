@@ -182,9 +182,10 @@ struct OverlayView: View {
                     linkIsDown: jellyfinLinkIsDown,
                     isHovering: $ambientHover,
                     onLaunch: { player.markAnticipating() },
-                    onUnreachable: {
-                        player.showTransient("Can't reach your Jellyfin server from this network.")
-                    }
+                    // Kept short deliberately: the transient renders inside this
+                    // same 120×120 ambient window, and a longer sentence wraps
+                    // to three lines that bury the glyph behind the capsule.
+                    onUnreachable: { player.showTransient("Can't reach Jellyfin here") }
                 )
             }
         }
