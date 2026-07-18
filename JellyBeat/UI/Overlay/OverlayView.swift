@@ -44,6 +44,18 @@ struct OverlayView: View {
         return (ambientHover || player.anticipating) ? 1.0 : 0.0
     }
 
+    /// True when the Jellyfin link itself is down, read from the *ungated*
+    /// health signal. `connectionState` can't answer this: a loopback source
+    /// (YouTube) pins it to `.connected` while it drives, which is exactly the
+    /// case where the ambient overlay would otherwise offer to launch a web app
+    /// against an unreachable server.
+    private var jellyfinLinkIsDown: Bool {
+        switch player.jellyfinLinkHealth {
+        case .reconnecting, .error: return true
+        case .idle, .connecting, .connected: return false
+        }
+    }
+
     /// `isOffline` while the link is down, `nil` while it's up. Drives the dim
     /// and the badge that `content` lays over the *shared* track view, which
     /// has to stay a single view across the connected/reconnecting boundary so
@@ -167,8 +179,13 @@ struct OverlayView: View {
             } else {
                 NothingPlayingView(
                     launchURL: settings.baseURL,
+                    linkIsDown: jellyfinLinkIsDown,
                     isHovering: $ambientHover,
-                    onLaunch: { player.markAnticipating() }
+                    onLaunch: { player.markAnticipating() },
+                    // Kept short deliberately: the transient renders inside this
+                    // same 120×120 ambient window, and a longer sentence wraps
+                    // to three lines that bury the glyph behind the capsule.
+                    onUnreachable: { player.showTransient("Can't reach Jellyfin here") }
                 )
             }
         }
@@ -333,45 +350,72 @@ private struct VolumeFeedbackView: View {
     }
 }
 
-/// Ambient idle state: the window shrinks to artwork-size (see
-/// `AppDelegate.applyWindowSizeForCurrentState`) and shows a large pair of
-/// beamed eighth notes (♫) as a launch affordance. The glyph stays visible at all times but at a
-/// subtle, low opacity; hovering brings it to full strength (and the
-/// surrounding glass fades in via `chromeOpacity`). Tapping launches the
-/// configured Jellyfin URL via `NSWorkspace.open`, which on macOS picks the
-/// user's chosen handler — useful when the user has registered a Safari
-/// "Add to Dock" web app for the Jellyfin URL.
+/// Ambient idle state: the window shrinks to a fixed 120×120 — the same for
+/// every theme, regardless of that theme's own artwork size (see
+/// `OverlayWindowController.applyWindowSizeForCurrentState`) — and shows a
+/// large pair of beamed eighth notes (♫) as a launch affordance. The glyph
+/// stays visible at all times but at a subtle, low opacity; hovering brings it
+/// to full strength (and the surrounding glass fades in via `chromeOpacity`).
+/// Tapping launches the configured Jellyfin URL via `NSWorkspace.open`, which
+/// on macOS picks the user's chosen handler — useful when the user has
+/// registered a Safari "Add to Dock" web app for the Jellyfin URL.
+///
+/// That 120×120 is a hard budget for anything added here: `TransientToastView`
+/// renders in this same window, so copy long enough to wrap past two lines
+/// covers the glyph it is explaining.
+///
+/// When the Jellyfin link is down (`linkIsDown`) the affordance changes
+/// meaning: the notes become a `wifi.slash` glyph and the tap explains why
+/// nothing can start instead of opening a web app against a server this
+/// network can't reach.
 private struct NothingPlayingView: View {
     let launchURL: URL?
+    let linkIsDown: Bool
     @Binding var isHovering: Bool
     let onLaunch: () -> Void
+    let onUnreachable: () -> Void
     @Environment(WindowSnapState.self) private var snapState
 
     var body: some View {
         GeometryReader { geo in
-            // Scale the logo to the ambient window so it reads as "a bigger
-            // icon" across themes whose artwork sizes differ (Classic 120 →
-            // Standard/Aero ~256).
+            // Half the ambient window, so the glyph reads as "a bigger icon".
+            // In practice that is always 60: the ambient window is a fixed
+            // 120×120 for every theme. Derived from the geometry rather than
+            // hardcoded so the glyph follows if that footprint ever changes.
             let side = min(geo.size.width, geo.size.height) * 0.5
             let snapped = snapState.alignment != .center
 
             ZStack(alignment: snapState.alignment) {
                 Color.clear.contentShape(Rectangle())
 
-                Image("AmbientNotes")
-                    .renderingMode(.template)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: side, height: side)
-                    .foregroundStyle(.secondary)
-                    .opacity(isHovering ? 0.95 : 0.35)
-                    .scaleEffect(isHovering ? 1.0 : 0.97)
-                    .padding(snapped ? 8 : 0)
+                Group {
+                    if linkIsDown {
+                        Image(systemName: "wifi.slash")
+                            .resizable()
+                            .scaledToFit()
+                            .fontWeight(.light)
+                            .frame(width: side * 0.8, height: side * 0.8)
+                    } else {
+                        Image("AmbientNotes")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: side, height: side)
+                    }
+                }
+                .foregroundStyle(.secondary)
+                .opacity(isHovering ? 0.95 : 0.35)
+                .scaleEffect(isHovering ? 1.0 : 0.97)
+                .padding(snapped ? 8 : 0)
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
         .onHover { isHovering = $0 }
         .onTapGesture {
+            // Off the home network the launch would open a blank web app and
+            // markAnticipating() would hold the chrome up for 30 s waiting on
+            // music that can't arrive. Say why instead.
+            guard !linkIsDown else { onUnreachable(); return }
             if let launchURL {
                 ClientLauncher.openJellyfin(launchURL)
                 onLaunch()

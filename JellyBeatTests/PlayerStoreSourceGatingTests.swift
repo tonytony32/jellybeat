@@ -98,4 +98,28 @@ struct PlayerStoreSourceGatingTests {
         #expect(store.currentTrack?.itemId == "yt-video")
         #expect(store.isLinkLive)
     }
+
+    /// The Jellyfin link-health signal is ungated: while another source drives
+    /// (and pins `connectionState` to `.connected`), a dropped Jellyfin link
+    /// must still be visible so the ambient overlay knows home is unreachable.
+    @Test
+    func gatedUpdatesStillTrackJellyfinLinkHealth() {
+        let store = PlayerStore()
+        store.jellyfinIsActiveSource = false
+        store.applyExternalSnapshot(
+            track: ytTrack(), isPaused: false, volume: 70, connection: .connected
+        )
+
+        store.updateConnection(.reconnecting(isOffline: true))
+        #expect(store.jellyfinLinkHealth == .reconnecting(isOffline: true))
+        #expect(store.isLinkLive)  // the shared state still belongs to YouTube
+
+        store.updateConnection(.error("bad key"))
+        #expect(store.jellyfinLinkHealth == .error("bad key"))
+
+        // A gated ingest means the server answered — the link is live again.
+        store.ingest(sessions: [playingSession()], userId: Self.userId)
+        #expect(store.jellyfinLinkHealth == .connected)
+        #expect(store.currentTrack?.itemId == "yt-video")  // still gated
+    }
 }

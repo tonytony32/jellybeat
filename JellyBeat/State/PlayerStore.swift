@@ -157,6 +157,14 @@ final class PlayerStore {
     /// that is genuinely playing over one merely parked/paused.
     private(set) var jellyfinIsPlaying: Bool = false
 
+    /// Health of the Jellyfin link itself, refreshed on every Jellyfin transport
+    /// update regardless of gating — unlike `connectionState`, which a loopback
+    /// source pins to `.connected` while it drives. The ambient overlay reads
+    /// this so it can tell "nothing is playing, and home is reachable" apart
+    /// from "nothing is playing because we're off the home network", instead of
+    /// offering a launch affordance that opens an unreachable URL.
+    private(set) var jellyfinLinkHealth: ConnectionState = .idle
+
     /// Called after every Jellyfin `ingest` so the arbiter can re-evaluate which
     /// source should drive, using the refreshed presence signal above.
     var onJellyfinUpdate: (@MainActor () -> Void)?
@@ -389,6 +397,10 @@ final class PlayerStore {
     /// Convenience for transient lifecycle states (connecting, reconnecting,
     /// errors) that do not carry a snapshot.
     func updateConnection(_ state: ConnectionState) {
+        // Record the raw Jellyfin link health before the gate, so the ambient
+        // overlay still knows whether home is reachable while another source
+        // drives (same rationale as the presence signals in `ingest`).
+        if jellyfinLinkHealth != state { jellyfinLinkHealth = state }
         // Dropped while YouTube is driving: the Jellyfin transport keeps
         // running for presence, but its lifecycle blips (a reconnecting tick,
         // an idle reset) must not repaint the overlay the YouTube feed owns.
@@ -488,6 +500,9 @@ final class PlayerStore {
         // drives.
         jellyfinHasNowPlaying = snapshot != nil
         jellyfinIsPlaying = snapshot != nil && !pausedFromServer
+        // A poll that produced sessions means the server answered: the link is
+        // live even if the gate below drops the state write.
+        if jellyfinLinkHealth != .connected { jellyfinLinkHealth = .connected }
         onJellyfinUpdate?()
 
         // Gated: YouTube is the active source, so don't let Jellyfin write the
