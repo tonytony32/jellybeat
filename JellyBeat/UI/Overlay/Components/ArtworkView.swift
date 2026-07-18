@@ -16,8 +16,11 @@ struct ArtworkView: View {
     var artworkURL: URL? = nil
     /// True when the active source can raise its own window/tab (the YouTube
     /// bridge's `focusTab`). When set, a double-click invokes `onFocus` and the
-    /// cover shows a pointer cursor + "go to the tab" tooltip; when false the
-    /// double-click falls back to opening the Jellyfin client.
+    /// cover shows a pointer cursor + "go to the tab" tooltip. When false the
+    /// cover is inert: a double-click here means "go to the active source", and
+    /// a source that can't be raised has nowhere to go. It deliberately does
+    /// *not* fall back to opening the Jellyfin client — that's the ambient
+    /// view's single click, and one gesture must not mean two things.
     var canFocusTab: Bool = false
     /// Invoked on double-click when `canFocusTab` is true. Wired by the theme to
     /// `PlayerStore.focusSource()`.
@@ -87,18 +90,15 @@ struct ArtworkView: View {
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .shadow(color: .black.opacity(shadowOpacity), radius: 9, x: 0, y: 4)
         .accessibilityLabel(String(localized: "Album artwork"))
-        .accessibilityAddTraits(.isButton)
-        .accessibilityHint(doubleClickHint)
-        .help(doubleClickHint)
-        // Pointer cursor only when the focus affordance is live; the Jellyfin
-        // open-on-double-click fallback keeps the default cursor as before.
+        // Button traits, tooltip and pointer cursor all appear together, only
+        // when the double-click actually does something.
+        .accessibilityAddTraits(canFocusTab ? .isButton : [])
+        .accessibilityHint(doubleClickHint ?? "")
+        .help(doubleClickHint ?? "")
         .pointerStyle(canFocusTab ? .link : nil)
         .onTapGesture(count: 2) {
-            if canFocusTab {
-                onFocus?()
-            } else if let url = settings.baseURL {
-                ClientLauncher.openJellyfin(url)
-            }
+            guard canFocusTab else { return }
+            onFocus?()
         }
         .contextMenu {
             AppMenuContent(settings: settings, registry: registry, arbiter: arbiter)
@@ -110,12 +110,11 @@ struct ArtworkView: View {
         .animation(.easeInOut(duration: 0.2), value: isLoading)
     }
 
-    /// Tooltip + accessibility hint, matched to what the double-click does for
-    /// the active source.
-    private var doubleClickHint: String {
-        canFocusTab
-            ? String(localized: "Double-click to go to the YouTube tab")
-            : String(localized: "Double-click to open the Jellyfin client")
+    /// Tooltip + accessibility hint, present only when the double-click has
+    /// somewhere to go. `nil` renders as no tooltip at all, rather than one
+    /// advertising a gesture that does nothing.
+    private var doubleClickHint: String? {
+        canFocusTab ? String(localized: "Double-click to go to the YouTube tab") : nil
     }
 
     private func loadImage() async {
