@@ -85,7 +85,7 @@ Contract essentials (frozen from YouTube's behavior):
 - `POST {prefix}/command` ← transport commands (`PlaybackCommanding`).
 - Every string field is **untrusted page content**; artwork URLs are
   scheme-restricted to `http`/`https`. The port is unauthenticated, an accepted
-  residual risk (ABI doc §7).
+  residual risk (ABI doc §8).
 
 ## 4. The command sink (`PlaybackCommanding`)
 
@@ -240,6 +240,29 @@ vocabulary. Notable seams added for multi-source:
 
 Command discipline (300 ms cooldown + `isCommandInFlight` + optimistic flips +
 the post-command "didn't respond" check) is **preserved** and now source-agnostic.
+
+### Ambient collapse & link health
+
+Two rules keep the ambient state from meaning three different things at once
+(the overlay used to reach it both when the home link was down and when a live
+pause had merely gone quiet):
+
+- **Asymmetric collapse grace.** A `nil` track clears the overlay only after a
+  grace period, and the length depends on what was on screen:
+  `defaultIdleCollapseGrace` (8 s) when the source was *playing*, but
+  `defaultPausedIdleCollapseGrace` (600 s) when it was *paused*. A producer that
+  legitimately goes quiet — a Safari tab throttled in the background — can no
+  longer turn a live pause into "nothing", which is what made the overlay
+  flicker between artwork and ambient. This is defense in depth on the consumer
+  side; the matching requirement on producers is the ABI's §7.
+- **Ungated link health.** `isLinkLive` reports the Jellyfin transport's real
+  state regardless of which source is driving, so it survives the
+  `jellyfinIsActiveSource` gate that silences Jellyfin's `.reconnecting` /
+  `.error` writes. The transport commands gate on it (and toast instead of
+  firing into a void), and the ambient view uses it to swap its glyph and refuse
+  to launch a client that can't be reached. Paired with the arbiter's all-idle
+  return home (§5), the overlay can no longer show a stale, cheerful ambient
+  while the server is unreachable.
 
 ## 7. `TrackSnapshot` & artwork
 

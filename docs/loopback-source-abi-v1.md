@@ -12,7 +12,7 @@ vendor-neutral and frozen. The consumer side lives in
 [`architecture.md`](architecture.md) §3/§5/§10 for how sources are arbitrated.
 
 > Status: **phase 1**. Discovery, the wire format, and the manifest are stable.
-> Authentication is intentionally absent in phase 1 (see §7); an optional token
+> Authentication is intentionally absent in phase 1 (see §8); an optional token
 > is *reserved* so it can be added without a major bump.
 
 ---
@@ -44,7 +44,7 @@ vendor-neutral and frozen. The consumer side lives in
 ```jsonc
 {
   "abi": "loopback-source/1",      // optional in v1
-  "sourceName": "YouTube",         // optional; diagnostics only, NOT the menu label (§7)
+  "sourceName": "YouTube",         // optional; diagnostics only, NOT the menu label (§8)
   "capabilities": {
     "canPlayPause": true, "canNext": true, "canPrevious": true,
     "canSeek": true, "canSetVolume": true,
@@ -72,12 +72,12 @@ vendor-neutral and frozen. The consumer side lives in
   "active": true,                 // false ⇒ idle (see below)
   "source": "youtube_music",      // string | null, diagnostics only
   "state": "playing",             // "playing" | "paused" | null
-  "title": "…", "artist": "…", "album": "…",   // string | null, UNTRUSTED (§7)
+  "title": "…", "artist": "…", "album": "…",   // string | null, UNTRUSTED (§8)
   "durationSec": 240,             // number | null  (null ⇒ unknown / livestream)
   "positionSec": 30,              // number | null
   "volume": 0.8,                  // 0.0–1.0 | null
   "itemId": "abc123",             // string | null, stable identity for this item
-  "artworkUrl": "https://…",      // string | null, UNTRUSTED; http/https only (§7)
+  "artworkUrl": "https://…",      // string | null, UNTRUSTED; http/https only (§8)
   "liked": false,                 // bool | null, "like" state; null/absent ⇒ false
   "updatedAtMs": 1700000000000    // number | null
 }
@@ -137,7 +137,41 @@ Everything else (a JSON decode failure from schema drift, or an unexpected
 status) is **logged** but still surfaced to the UI as idle, so a breaking change
 is debuggable instead of an invisible permanent "idle".
 
-## 7. Security & trust
+## 7. Staleness and pauses
+
+Idle (§6) is about a source that isn't *there*. This is about a source that is
+there but hasn't **spoken recently** — and getting it wrong makes the overlay
+flicker between the artwork and the ambient glyph. Two normative rules:
+
+- **A presence TTL must be at least 2× the producer's slowest possible
+  heartbeat.** If a source can legitimately go quiet for 30 s, a 3 s TTL will
+  expire it mid-track and the overlay will drop to ambient and snap back on the
+  next beat. Size the TTL against the *worst* case the producer can hit, not the
+  typical one.
+- **A `paused` state must not decay into `{"active": false}` on a short
+  silence.** Pause is a first-class state, not a weak signal of absence: a
+  paused source keeps serving `{"active": true, "state": "paused"}` while it is
+  still the thing the user last played. Expire it only after a **long** TTL
+  (~30 min) — the point at which "paused" has stopped meaning anything.
+
+A source that knows its data is aging should say so rather than lie: report
+freshness with `updatedAtMs` (§4), or expose a `staleMs` field alongside it.
+Both are advisory — the app treats a stale-but-active reading as active — but
+they let a source be honest about the gap instead of flipping to idle.
+
+> **Worked example — the Safari bridge.** The [yt-safari-bridge][ytbridge]
+> produces from a Safari extension, and Safari throttles background pages: a
+> tab that isn't frontmost may not run its timer for tens of seconds. The bridge
+> keeps a keepalive alarm at 30 s, which is the real floor on its heartbeat. An
+> early version paired that producer with a 3 s presence TTL on the consumer
+> side, and the overlay visibly blinked artwork↔ambient whenever the tab was
+> backgrounded — a paused track would also expire to idle within seconds and
+> lose its place. Both rules above come from that bug: the TTL now clears 2× the
+> 30 s alarm, and a pause survives until the long TTL.
+
+[ytbridge]: https://github.com/tonytony32/yt-safari-bridge.git
+
+## 8. Security & trust
 
 Phase-1 posture, stated plainly so plugin authors and users know exactly what is
 and isn't guaranteed.
@@ -169,7 +203,7 @@ and isn't guaranteed.
   to harden against same-user squatters / browser-origin POSTs. The field name
   is reserved here so it can be added compatibly.
 
-## 8. Discovery & manifest
+## 9. Discovery & manifest
 
 JellyBeat scans **once at launch** (no hot-reload in phase 1; adding a source
 needs a relaunch):
@@ -187,7 +221,7 @@ greppability) describing one source:
   "id": "com.example.spotify-bridge",  // required; reverse-DNS recommended.
                                        //   [a-z0-9._-], ≤128 chars. Becomes the
                                        //   stable source id + persistence key.
-  "displayName": "Spotify",            // required; the TRUSTED menu label (§7)
+  "displayName": "Spotify",            // required; the TRUSTED menu label (§8)
   "port": 8980,                        // required; 1024–65535
   "pathPrefix": "/v1",                 // optional; default "/v1"
   "homeRank": 100,                     // optional; lower = more "home" (fallback
@@ -214,7 +248,7 @@ greppability) describing one source:
 
 ### Adding a source (third party)
 
-1. Run a local process that implements §3–§6 on a `127.0.0.1` port.
+1. Run a local process that implements §3–§7 on a `127.0.0.1` port.
 2. Drop a `*.jellysource` manifest (above) into the Sources directory.
 3. Relaunch JellyBeat. The source appears in the menu-bar **Source** picker and
    is arbitrated automatically.

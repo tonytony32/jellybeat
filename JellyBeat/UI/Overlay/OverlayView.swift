@@ -376,6 +376,13 @@ private struct NothingPlayingView: View {
     let onUnreachable: () -> Void
     @Environment(WindowSnapState.self) private var snapState
 
+    /// A double-click delivers two taps here, and each one would launch the
+    /// client (or fire the toast) again. Debounced like `PlayerStore
+    /// .focusSource()`, so a burst acts at most once per second and the second
+    /// click of a double-click is absorbed.
+    @State private var lastTapAt: Date?
+    private static let tapDebounce: TimeInterval = 1.0
+
     var body: some View {
         GeometryReader { geo in
             // Half the ambient window, so the glyph reads as "a bigger icon".
@@ -412,6 +419,11 @@ private struct NothingPlayingView: View {
         }
         .onHover { isHovering = $0 }
         .onTapGesture {
+            if let lastTapAt,
+               Date().timeIntervalSince(lastTapAt) < Self.tapDebounce {
+                return
+            }
+            lastTapAt = Date()
             // Off the home network the launch would open a blank web app and
             // markAnticipating() would hold the chrome up for 30 s waiting on
             // music that can't arrive. Say why instead.

@@ -3,7 +3,7 @@ import os
 
 /// On-disk descriptor for a third-party loopback `PlaybackSource`, decoded from a
 /// `*.jellysource` JSON file in the Sources directory (see
-/// `docs/loopback-source-abi-v1.md` §8). Declares only identity, where to reach
+/// `docs/loopback-source-abi-v1.md` §9). Declares only identity, where to reach
 /// the source, and arbitration ranking — **never** capabilities, which come from
 /// `GET /health` at runtime so a manifest can't overstate what the process does.
 nonisolated struct LoopbackSourceManifest: Decodable, Equatable, Sendable {
