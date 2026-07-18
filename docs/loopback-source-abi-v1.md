@@ -137,6 +137,40 @@ Everything else (a JSON decode failure from schema drift, or an unexpected
 status) is **logged** but still surfaced to the UI as idle, so a breaking change
 is debuggable instead of an invisible permanent "idle".
 
+### 6.1 Staleness and pauses
+
+Idle (§6) is about a source that isn't *there*. This is about a source that is
+there but hasn't **spoken recently** — and getting it wrong makes the overlay
+flicker between the artwork and the ambient glyph. Two normative rules:
+
+- **A presence TTL must be at least 2× the producer's slowest possible
+  heartbeat.** If a source can legitimately go quiet for 30 s, a 3 s TTL will
+  expire it mid-track and the overlay will drop to ambient and snap back on the
+  next beat. Size the TTL against the *worst* case the producer can hit, not the
+  typical one.
+- **A `paused` state must not decay into `{"active": false}` on a short
+  silence.** Pause is a first-class state, not a weak signal of absence: a
+  paused source keeps serving `{"active": true, "state": "paused"}` while it is
+  still the thing the user last played. Expire it only after a **long** TTL
+  (~30 min) — the point at which "paused" has stopped meaning anything.
+
+A source that knows its data is aging should say so rather than lie: report
+freshness with `updatedAtMs` (§4), or expose a `staleMs` field alongside it.
+Both are advisory — the app treats a stale-but-active reading as active — but
+they let a source be honest about the gap instead of flipping to idle.
+
+> **Worked example — the Safari bridge.** The [yt-safari-bridge][ytbridge]
+> produces from a Safari extension, and Safari throttles background pages: a
+> tab that isn't frontmost may not run its timer for tens of seconds. The bridge
+> keeps a keepalive alarm at 30 s, which is the real floor on its heartbeat. An
+> early version paired that producer with a 3 s presence TTL on the consumer
+> side, and the overlay visibly blinked artwork↔ambient whenever the tab was
+> backgrounded — a paused track would also expire to idle within seconds and
+> lose its place. Both rules above come from that bug: the TTL now clears 2× the
+> 30 s alarm, and a pause survives until the long TTL.
+
+[ytbridge]: https://github.com/tonytony32/yt-safari-bridge.git
+
 ## 7. Security & trust
 
 Phase-1 posture, stated plainly so plugin authors and users know exactly what is
