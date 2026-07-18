@@ -40,6 +40,16 @@ Standalone HTML diagrams. Open them in a browser.
 | [`visualizations/git-historia.html`](visualizations/git-historia.html) | The git graph and rebase history. |
 | [`visualizations/websocket-timeline.html`](visualizations/websocket-timeline.html) | The WebSocket connection and reconnection timeline. |
 
+## Audits ([`audits/`](audits/))
+
+Dated, point-in-time reviews. Like `plans/`, they capture the state of things
+on their date and are **not** kept in sync with the code afterwards.
+
+| Doc | What it covers |
+|-----|----------------|
+| [`audits/2026-07-18-listening-journey-ux.html`](audits/2026-07-18-listening-journey-ux.html) | UX audit of the listening journey: the source→overlay pipeline and its timers, the cover↔ambient flicker with a paused throttled Safari tab, the blank-window launch when Jellyfin is unreachable, and the proposed target state machine. Standalone HTML, open in a browser. *(Spanish.)* |
+| [`audits/2026-07-18-listening-journey-prompts.md`](audits/2026-07-18-listening-journey-prompts.md) | The five self-contained implementation prompts for that audit's fixes, with their ordering and dependencies. *(Spanish.)* |
+
 ## Not in version control
 
 - `themes/`: the theme/layout design spec (`music-player-themes.md`) plus the
