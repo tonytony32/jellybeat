@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JellyBeat · Auditoría UX del journey de escucha · 2026-07-18</title>
+<style>
+  :root {
+    --bg: #F3F4F7;
+    --panel: #FFFFFF;
+    --panel-2: #EAECF2;
+    --ink: #1C1F27;
+    --ink-2: #5A6072;
+    --line: #D9DCE5;
+    --accent: #6C63E0;
+    --accent-soft: #EDECFB;
+    --ok: #3E9E6E;
+    --ok-soft: #E3F2EA;
+    --warn: #B87F1F;
+    --warn-soft: #F7EDDA;
+    --bad: #C75454;
+    --bad-soft: #F9E7E7;
+    --mock-bg: #14161d;
+    --mock-ink: #e8eaf2;
+    --mock-ink-2: #8b90a3;
+    --shadow: 0 1px 2px rgba(20,22,29,.06), 0 8px 24px rgba(20,22,29,.07);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101218;
+      --panel: #181B23;
+      --panel-2: #202430;
+      --ink: #E7E9F2;
+      --ink-2: #9AA1B5;
+      --line: #2A2F3D;
+      --accent: #8F88F0;
+      --accent-soft: #262347;
+      --ok: #57BE8C;
+      --ok-soft: #1B3229;
+      --warn: #D9A03F;
+      --warn-soft: #37301C;
+      --bad: #E07B7B;
+      --bad-soft: #3B2224;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+    font-size: 15.5px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 56px 24px 96px; }
+  .wide { max-width: 1080px; margin-left: auto; margin-right: auto; }
+
+  code, .mono {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: .86em;
+  }
+  code {
+    background: var(--panel-2);
+    border-radius: 5px;
+    padding: .1em .35em;
+  }
+
+  /* ---------- header ---------- */
+  .eyebrow {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 600;
+    margin: 0 0 14px;
+  }
+  h1 {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+    font-size: clamp(30px, 5vw, 44px);
+    line-height: 1.08;
+    letter-spacing: -.025em;
+    font-weight: 800;
+    margin: 0 0 14px;
+    text-wrap: balance;
+  }
+  .lede { font-size: 17px; color: var(--ink-2); max-width: 62ch; margin: 0 0 8px; }
+  .meta {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    margin-top: 20px;
+  }
+  .meta span {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11.5px;
+    color: var(--ink-2);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 3px 11px;
+  }
+
+  /* ---------- tldr ---------- */
+  .tldr {
+    margin-top: 36px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    padding: 22px 26px;
+  }
+  .tldr h2 {
+    margin: 0 0 12px;
+    font-size: 12px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    letter-spacing: .14em; text-transform: uppercase;
+    color: var(--ink-2); font-weight: 600;
+  }
+  .tldr ol { margin: 0; padding-left: 22px; display: grid; gap: 10px; }
+  .tldr li strong { font-weight: 650; }
+
+  /* ---------- sections ---------- */
+  section { margin-top: 76px; }
+  .sec-eyebrow {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--ink-2); font-weight: 600; margin: 0 0 8px;
+  }
+  .sec-eyebrow b { color: var(--accent); font-weight: 700; }
+  h2.title {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+    font-size: 26px; font-weight: 750; letter-spacing: -.02em;
+    margin: 0 0 14px; text-wrap: balance;
+  }
+  h3 { font-size: 17px; font-weight: 700; letter-spacing: -.01em; margin: 30px 0 8px; }
+  p { max-width: 68ch; margin: 0 0 14px; }
+  p.note { color: var(--ink-2); font-size: 14px; }
+  ul.plain { max-width: 70ch; padding-left: 20px; margin: 0 0 14px; display: grid; gap: 8px; }
+
+  .chip {
+    display: inline-block;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 10.5px; letter-spacing: .02em;
+    border-radius: 5px; padding: 1.5px 7px;
+    background: var(--panel-2); color: var(--ink-2);
+    border: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  .chip.accent { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+  .chip.ok   { background: var(--ok-soft);   color: var(--ok);   border-color: transparent; }
+  .chip.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+  .chip.bad  { background: var(--bad-soft);  color: var(--bad);  border-color: transparent; }
+
+  /* ---------- pipeline ---------- */
+  .pipe-scroll { overflow-x: auto; padding-bottom: 8px; }
+  .pipe {
+    min-width: 940px;
+    display: grid;
+    grid-template-columns: 1.15fr 26px 1.15fr 26px 1fr 26px 1fr 26px 1fr;
+    gap: 10px 0;
+    align-items: stretch;
+    margin-top: 22px;
+  }
+  .stage { display: grid; gap: 10px; align-content: start; }
+  .stage-label {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--ink-2); font-weight: 600;
+    padding-bottom: 2px;
+  }
+  .node {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 12px;
+    box-shadow: var(--shadow);
+  }
+  .node h4 { margin: 0 0 3px; font-size: 13px; font-weight: 700; }
+  .node p { margin: 0 0 6px; font-size: 12px; color: var(--ink-2); line-height: 1.45; }
+  .node .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .node.jf { border-left: 3px solid var(--ok); }
+  .node.yt { border-left: 3px solid var(--accent); }
+  .node.hub { border-left: 3px solid var(--warn); }
+  .arrowcol {
+    display: flex; align-items: center; justify-content: center;
+    color: var(--ink-2); font-size: 15px; padding-top: 22px;
+  }
+  .lanekey { display: flex; gap: 14px; margin-top: 14px; flex-wrap: wrap; }
+  .lanekey span { font-size: 12px; color: var(--ink-2); display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
+
+  /* ---------- overlay state cards ---------- */
+  .states {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
+    gap: 14px;
+    margin: 24px 0 8px;
+  }
+  .state-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 12px;
+    box-shadow: var(--shadow);
+    display: grid;
+    gap: 8px;
+    align-content: start;
+  }
+  .mock {
+    /* El overlay real es una tarjeta de cristal oscuro: los mocks se quedan
+       oscuros en ambos temas a propósito. */
+    background: var(--mock-bg);
+    color: var(--mock-ink);
+    border-radius: 10px;
+    aspect-ratio: 1.25;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 6px;
+    font-size: 11px;
+    position: relative;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,.08);
+  }
+  .mock .art {
+    width: 44px; height: 44px; border-radius: 7px;
+    background: linear-gradient(135deg, #7d6ff0, #4ea0d8 60%, #3b7f68);
+  }
+  .mock .art.dim { opacity: .35; }
+  .mock .bars { display: grid; gap: 3px; justify-items: center; }
+  .mock .bars i { display: block; height: 4px; border-radius: 2px; background: var(--mock-ink); opacity: .85; width: 58px; }
+  .mock .bars i + i { width: 38px; opacity: .4; }
+  .mock .prog { width: 70%; height: 3px; border-radius: 2px; background: rgba(255,255,255,.18); position: relative; }
+  .mock .prog i { position: absolute; inset: 0 45% 0 0; background: #8F88F0; border-radius: 2px; }
+  .mock .glyph { font-size: 26px; line-height: 1; opacity: .45; }
+  .mock .pill {
+    font-size: 9px; padding: 2px 8px; border-radius: 999px;
+    background: rgba(255,255,255,.12); color: var(--mock-ink);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  .mock .pill.btn { background: #6C63E0; }
+  .mock .txt { color: var(--mock-ink-2); text-align: center; padding: 0 8px; line-height: 1.3; }
+  .mock .pausebadge { position: absolute; top: 7px; right: 8px; font-size: 12px; opacity: .8; }
+  .state-card h4 { margin: 0; font-size: 13.5px; font-weight: 700; }
+  .state-card .cond {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 10px; color: var(--ink-2); line-height: 1.5; word-break: break-word;
+  }
+
+  /* ---------- matrix table ---------- */
+  .tablewrap { overflow-x: auto; margin-top: 20px; border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 640px;
+    background: var(--panel);
+    font-size: 13.5px;
+  }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  th {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-2); font-weight: 600;
+    background: var(--panel-2);
+  }
+  td .mono { color: var(--ink-2); }
+  tr.hot td { background: color-mix(in srgb, var(--warn-soft) 55%, var(--panel)); }
+  td.num { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums; font-size: 12.5px; white-space: nowrap; }
+
+  /* ---------- timeline (bug B) ---------- */
+  .timeline {
+    margin-top: 24px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    padding: 22px 22px 16px;
+    overflow-x: auto;
+  }
+  .tl-inner { min-width: 720px; }
+  .lane { display: grid; grid-template-columns: 130px 1fr; align-items: center; gap: 14px; margin-bottom: 14px; }
+  .lane-label { font-size: 12px; color: var(--ink-2); line-height: 1.35; }
+  .lane-label b { display: block; color: var(--ink); font-size: 12.5px; }
+  .track { position: relative; height: 30px; background: var(--panel-2); border-radius: 7px; }
+  .band { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; font-size: 10px; font-family: ui-monospace, "SF Mono", Menlo, monospace; overflow: hidden; white-space: nowrap; }
+  .band.fresh { background: var(--ok); color: #fff; border-radius: 4px; }
+  .band.stale {
+    background: repeating-linear-gradient(-45deg, transparent 0 5px, color-mix(in srgb, var(--ink) 14%, transparent) 5px 7px);
+    color: var(--ink-2);
+  }
+  .band.cover { background: var(--accent); color: #fff; border-radius: 4px; }
+  .band.ambient {
+    background: repeating-linear-gradient(-45deg, transparent 0 5px, color-mix(in srgb, var(--ink) 14%, transparent) 5px 7px);
+    color: var(--ink-2);
+  }
+  .track.syncs { background: transparent; }
+  .sync {
+    position: absolute; top: 0; bottom: 0; width: 3px; border-radius: 2px;
+    background: var(--warn);
+  }
+  .sync span {
+    position: absolute; top: -4px; left: 7px;
+    font-size: 10px; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    color: var(--warn); white-space: nowrap;
+  }
+  .axis { position: relative; height: 22px; margin-left: 144px; }
+  .axis i {
+    position: absolute; top: 0;
+    font-size: 10px; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    color: var(--ink-2); font-style: normal; transform: translateX(-50%);
+  }
+  .brackets { position: relative; height: 34px; margin-left: 144px; margin-bottom: 4px; }
+  .bracket { position: absolute; top: 4px; border: 1.5px solid var(--warn); border-bottom: none; height: 9px; border-radius: 4px 4px 0 0; }
+  .bracket span {
+    position: absolute; top: -19px; left: 50%; transform: translateX(-50%);
+    font-size: 10px; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    color: var(--warn); white-space: nowrap;
+  }
+  .tl-legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 10px; padding-left: 144px; }
+  .tl-legend span { font-size: 11.5px; color: var(--ink-2); display: inline-flex; gap: 6px; align-items: center; }
+
+  /* ---------- bug A chain ---------- */
+  .chain { margin-top: 22px; display: grid; gap: 0; max-width: 720px; }
+  .step { display: grid; grid-template-columns: 34px 1fr; gap: 14px; position: relative; padding-bottom: 14px; }
+  .step .n {
+    width: 26px; height: 26px; border-radius: 8px;
+    background: var(--panel-2); color: var(--ink-2);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; font-weight: 600;
+    display: flex; align-items: center; justify-content: center;
+    margin-top: 2px;
+    position: relative; z-index: 1;
+  }
+  .step.final .n { background: var(--bad-soft); color: var(--bad); }
+  .step .body p { margin: 0 0 6px; font-size: 14px; }
+  .step .body .chips { display: flex; flex-wrap: wrap; gap: 5px; }
+  .step:not(:last-child)::before {
+    content: ""; position: absolute; left: 12px; top: 32px; bottom: 0;
+    width: 2px; background: var(--line);
+  }
+
+  /* ---------- callout ---------- */
+  .callout {
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    border-radius: 0 12px 12px 0;
+    padding: 14px 18px;
+    margin: 22px 0;
+    max-width: 720px;
+  }
+  .callout.warn { border-color: var(--warn); background: var(--warn-soft); }
+  .callout p { margin: 0; font-size: 14.5px; }
+  .callout p + p { margin-top: 8px; }
+
+  /* ---------- fixes ---------- */
+  .fixes { display: grid; gap: 12px; margin-top: 22px; }
+  .fix {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    padding: 16px 18px;
+    display: grid;
+    grid-template-columns: 34px 1fr;
+    gap: 14px;
+  }
+  .fix .rank {
+    width: 28px; height: 28px; border-radius: 9px;
+    background: var(--accent); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 13.5px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  .fix h4 { margin: 1px 0 5px; font-size: 15px; font-weight: 700; }
+  .fix p { margin: 0 0 9px; font-size: 14px; color: var(--ink-2); max-width: 62ch; }
+  .fix .chips { display: flex; flex-wrap: wrap; gap: 5px; }
+
+  /* ---------- state machine (propuesta) ---------- */
+  .sm {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    padding: 22px;
+    margin-top: 22px;
+    overflow-x: auto;
+  }
+  .sm-row {
+    min-width: 780px;
+    display: grid;
+    grid-template-columns: auto 1fr auto 1fr auto 1fr auto;
+    align-items: center;
+  }
+  .sm-node {
+    background: var(--panel-2);
+    border: 1.5px solid var(--line);
+    border-radius: 12px;
+    padding: 10px 18px;
+    text-align: center;
+    font-weight: 700;
+    font-size: 14.5px;
+  }
+  .sm-node small { display: block; font-weight: 500; font-size: 10.5px; color: var(--ink-2); margin-top: 2px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .sm-node.new { border-color: var(--accent); background: var(--accent-soft); }
+  .sm-node.new small { color: var(--accent); }
+  .sm-edge { display: grid; gap: 5px; padding: 0 12px; text-align: center; }
+  .sm-edge span {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 10.5px; color: var(--ink-2); white-space: nowrap;
+  }
+  .sm-return {
+    margin-top: 16px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11.5px; color: var(--ink-2);
+    border-top: 1px dashed var(--line);
+    padding-top: 12px;
+    min-width: 780px;
+  }
+  .sm-notes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; min-width: 780px; }
+  .sm-note {
+    background: var(--panel-2);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 12.5px;
+    color: var(--ink-2);
+  }
+  .sm-note b { color: var(--ink); }
+
+  footer {
+    margin-top: 84px;
+    border-top: 1px solid var(--line);
+    padding-top: 22px;
+    color: var(--ink-2);
+    font-size: 13.5px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="eyebrow">Auditoría UX · JellyBeat · 18 de julio de 2026</p>
+  <h1>El journey de escucha, ordenado</h1>
+  <p class="lede">Cómo fluye hoy el estado de reproducción desde cada fuente hasta el overlay, por qué la portada parpadea con Safari en pausa, por qué el doble clic abre una ventana en blanco sin Jellyfin — y una propuesta para que el journey tenga reglas en vez de coincidencias.</p>
+  <div class="meta">
+    <span>jellybeat @ main (f6d94e6)</span>
+    <span>yt-safari-bridge (YTBridge)</span>
+    <span>2026-07-18</span>
+  </div>
+
+  <div class="tldr">
+    <h2>Resumen</h2>
+    <ol>
+      <li><strong>Los dos bugs son el mismo fallo estructural.</strong> El estado «ambiente» significa hoy tres cosas distintas a la vez: «conectado y sin música», «Jellyfin muerto pero un loopback mandó alguna vez», y «hay una pausa viva que se ha quedado dormida». El overlay no distingue ninguna.</li>
+      <li><strong>El parpadeo es un choque de tres relojes que nunca se diseñaron juntos:</strong> Safari en segundo plano solo sincroniza cada <span class="mono">30 s</span> (alarma keepalive), el bridge declara «idle» a los <span class="mono">3 s</span> sin sync, y JellyBeat colapsa a ambiente tras <span class="mono">8 s</span> sin track. Resultado: portada ~11 s → ambiente ~19 s, en bucle.</li>
+      <li><strong>La ventana en blanco es el ambiente mintiendo.</strong> Con un loopback como fuente activa, el árbitro publica siempre <code>.connected</code> y silencia para siempre el <code>.reconnecting</code> real de Jellyfin; el ambiente ofrece «abrir Jellyfin» sin saber si existe, y encima se queda 30 s «esperando música» que no puede llegar.</li>
+    </ol>
+  </div>
+
+  <!-- ============================================================ -->
+  <section>
+    <p class="sec-eyebrow"><b>01</b> · Cómo funciona hoy</p>
+    <h2 class="title">Un pipeline de dos carriles con quince relojes</h2>
+    <p>Todo lo que ve el overlay pasa por una única tubería: fuentes → transporte → árbitro → <code>PlayerStore</code> → representación. El diseño de fondo es bueno (un solo punto de verdad, escrituras gateadas, política de decisión pura y testeada). El caos que percibes no está en la estructura: está en los <em>tiempos</em>. Cada tramo tiene sus propias cadencias y umbrales, definidos en ficheros distintos, en procesos distintos, y ninguno conoce los del vecino.</p>
+  </section>
+
+  <div class="wide">
+    <div class="pipe-scroll">
+      <div class="pipe">
+        <div class="stage">
+          <div class="stage-label">Fuentes</div>
+          <div class="node jf">
+            <h4>Servidor Jellyfin</h4>
+            <p>Sesiones vía WebSocket push o REST.</p>
+            <div class="chips"><span class="chip">push 1.5 s sonando</span><span class="chip">4 s idle</span></div>
+          </div>
+          <div class="node yt">
+            <h4>Safari · YouTube / YT Music</h4>
+            <p>Content script lee el player del DOM.</p>
+            <div class="chips"><span class="chip">0.5 s sonando</span><span class="chip">1 s en pausa</span><span class="chip warn">2º plano: solo alarma 30 s</span></div>
+          </div>
+          <div class="node yt">
+            <h4>Plugins loopback</h4>
+            <p>Cualquier <code>*.jellysource</code>. Mismo carril que YouTube.</p>
+          </div>
+        </div>
+        <div class="arrowcol">→</div>
+        <div class="stage">
+          <div class="stage-label">Transporte</div>
+          <div class="node jf">
+            <h4>Socket + Poller</h4>
+            <p>Reintento 2 s ×3 → fallback a polling; revival del socket a los 60 s. Filtro de sesión: 60 s sonando / 180 s en pausa.</p>
+            <div class="chips"><span class="chip">PlaybackConnectionCoordinator</span></div>
+          </div>
+          <div class="node yt">
+            <h4>YTBridge (app aparte)</h4>
+            <p>HTTP en <code>127.0.0.1:8976</code>. Sin sync reciente, sirve <code>{active:false}</code>.</p>
+            <div class="chips"><span class="chip warn">TTL 3 s</span><span class="chip">self-heal 5 s</span></div>
+          </div>
+        </div>
+        <div class="arrowcol">→</div>
+        <div class="stage">
+          <div class="stage-label">Feeds</div>
+          <div class="node jf">
+            <h4>ingest(sessions)</h4>
+            <p>Heurística de sesión activa + señales de presencia.</p>
+          </div>
+          <div class="node yt">
+            <h4>LoopbackSourceFeed ×N</h4>
+            <p>Poll del bridge y normalización.</p>
+            <div class="chips"><span class="chip">poll 1 s</span></div>
+          </div>
+        </div>
+        <div class="arrowcol">→</div>
+        <div class="stage">
+          <div class="stage-label">Árbitro</div>
+          <div class="node hub">
+            <h4>SourceArbiter.decide</h4>
+            <p>forzado → sonando → recencia → pausa pegajosa → home → mantener. Gatea quién escribe.</p>
+            <div class="chips"><span class="chip">debounce 1 s</span><span class="chip bad">loopback publica siempre .connected</span></div>
+          </div>
+        </div>
+        <div class="arrowcol">→</div>
+        <div class="stage">
+          <div class="stage-label">Estado + UI</div>
+          <div class="node hub">
+            <h4>PlayerStore</h4>
+            <p>Snapshot único, ventanas optimistas 1.5 / 2 / 2.5 s.</p>
+            <div class="chips"><span class="chip warn">colapso a ambiente: 8 s</span></div>
+          </div>
+          <div class="node hub">
+            <h4>Overlay</h4>
+            <p>7 representaciones; ventana full ⇄ ambiente 120×120.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="lanekey">
+      <span><i class="dot" style="background:var(--ok)"></i> carril Jellyfin (privilegiado)</span>
+      <span><i class="dot" style="background:var(--accent)"></i> carril loopback (YouTube + plugins)</span>
+      <span><i class="dot" style="background:var(--warn)"></i> punto de convergencia</span>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <section>
+    <p class="sec-eyebrow"><b>02</b> · La representación</p>
+    <h2 class="title">Siete caras para una sola variable</h2>
+    <p>El overlay elige qué pintar a partir de <code>connectionState</code> + «¿hay track?». El problema: <code>connectionState</code> mezcla dos cosas que deberían ser ejes independientes — la <em>salud del enlace con Jellyfin</em> y el <em>estado de la escucha</em> — y además la puede escribir otra fuente. Cuando un loopback manda, el árbitro publica <code>.connected</code> incondicionalmente y los estados de enlace de Jellyfin quedan mudos.</p>
+
+    <div class="states wide">
+      <div class="state-card">
+        <div class="mock">
+          <span class="glyph">♪</span>
+          <span class="txt">Configure your Jellyfin server</span>
+          <span class="pill btn">Open Settings…</span>
+        </div>
+        <h4>Sin configurar</h4>
+        <div class="cond">.idle · sin track posible</div>
+      </div>
+      <div class="state-card">
+        <div class="mock">
+          <span class="glyph" style="opacity:.9">⚠︎</span>
+          <span class="txt">Mensaje de error</span>
+          <span class="pill">Open Settings…</span>
+        </div>
+        <h4>Error duro</h4>
+        <div class="cond">.error · borra el track</div>
+      </div>
+      <div class="state-card">
+        <div class="mock">
+          <span class="glyph">⌁</span>
+          <span class="txt">You're offline / Lost connection</span>
+          <span class="pill">Reconnecting…</span>
+        </div>
+        <h4>Sin conexión</h4>
+        <div class="cond">.reconnecting · track == nil</div>
+      </div>
+      <div class="state-card">
+        <div class="mock">
+          <div class="art"></div>
+          <div class="bars"><i></i><i></i></div>
+          <div class="prog"><i></i></div>
+        </div>
+        <h4>Sonando</h4>
+        <div class="cond">.connected · track · tema ×4</div>
+      </div>
+      <div class="state-card">
+        <div class="mock">
+          <span class="pausebadge">❚❚</span>
+          <div class="art"></div>
+          <div class="bars"><i></i><i></i></div>
+          <div class="prog"><i></i></div>
+        </div>
+        <h4>Pausado</h4>
+        <div class="cond">.connected · track · isPaused</div>
+      </div>
+      <div class="state-card">
+        <div class="mock">
+          <div class="art dim"></div>
+          <span class="pill">⟳ Reconnecting…</span>
+        </div>
+        <h4>Reconectando con track</h4>
+        <div class="cond">.reconnecting · track ≠ nil · atenuado</div>
+      </div>
+      <div class="state-card">
+        <div class="mock">
+          <span class="glyph" style="font-size:34px">♫</span>
+        </div>
+        <h4>Ambiente</h4>
+        <div class="cond">.connected · track == nil · 120×120 · clic → Jellyfin</div>
+      </div>
+    </div>
+
+    <div class="tablewrap wide">
+      <table>
+        <thead>
+          <tr><th>connectionState</th><th>Sin track</th><th>Con track</th><th>Quién puede escribirlo</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="num">.idle</td>
+            <td>«Configure your Jellyfin server»</td>
+            <td class="mono">—</td>
+            <td>Coordinator (sin config)</td>
+          </tr>
+          <tr>
+            <td class="num">.connecting</td>
+            <td>⚠ vista ambiente a tamaño completo (transitorio raro)</td>
+            <td>Tema normal</td>
+            <td>Coordinator</td>
+          </tr>
+          <tr class="hot">
+            <td class="num">.connected</td>
+            <td><b>Ambiente</b> — aquí viven los dos bugs</td>
+            <td>Tema (sonando / pausado)</td>
+            <td>Jellyfin (gateado) <b>y</b> árbitro (loopback, siempre)</td>
+          </tr>
+          <tr>
+            <td class="num">.reconnecting</td>
+            <td>«You're offline» + spinner</td>
+            <td>Tema atenuado + badge</td>
+            <td>Solo Jellyfin — <b>silenciado si un loopback manda</b></td>
+          </tr>
+          <tr>
+            <td class="num">.error</td>
+            <td>Triángulo + mensaje</td>
+            <td class="mono">— (lo borra)</td>
+            <td>Solo Jellyfin — ídem</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:14px">La fila caliente es la sobrecarga semántica: <code>.connected</code> + sin track puede significar «todo bien, silencio elegido» o «no sé nada de nadie desde hace rato». El usuario no puede distinguirlos, y el código tampoco.</p>
+  </section>
+
+  <!-- ============================================================ -->
+  <section>
+    <p class="sec-eyebrow"><b>03</b> · Bug B</p>
+    <h2 class="title">La portada que parpadea cada ~10 s</h2>
+    <p>Con un vídeo <b>en pausa</b> y Safari en segundo plano, macOS congela los timers del content script (el heartbeat de 1 s en pausa deja de correr). Lo único que sigue vivo es la alarma keepalive de la extensión, que cada 30 s reenvía el <em>último estado cacheado</em> — que sigue diciendo «pausado, activo». El bridge, con su TTL de 3 s, convierte eso en una onda cuadrada: 3 s «activo» → 27 s «idle». Y JellyBeat, con su gracia de 8 s, la convierte en teatro: la ventana crece con la portada, aguanta, colapsa a la nota ambiente, y vuelta a empezar.</p>
+
+    <div class="timeline wide">
+      <div class="tl-inner">
+        <div class="brackets">
+          <div class="bracket" style="left:0%; width:4.84%"><span>TTL 3 s (bridge)</span></div>
+          <div class="bracket" style="left:4.84%; width:12.9%"><span>gracia 8 s (PlayerStore)</span></div>
+        </div>
+        <div class="lane">
+          <div class="lane-label"><b>Syncs desde Safari</b>alarma keepalive · 2º plano</div>
+          <div class="track syncs">
+            <div class="sync" style="left:0%"><span>sync</span></div>
+            <div class="sync" style="left:48.4%"><span>sync (30 s)</span></div>
+            <div class="sync" style="left:96.8%"><span>sync (60 s)</span></div>
+          </div>
+        </div>
+        <div class="lane">
+          <div class="lane-label"><b>YTBridge sirve</b>StateStore · TTL 3 s</div>
+          <div class="track">
+            <div class="band fresh" style="left:0%; width:4.84%"></div>
+            <div class="band stale" style="left:4.84%; width:43.5%">{active:false}</div>
+            <div class="band fresh" style="left:48.4%; width:4.84%"></div>
+            <div class="band stale" style="left:53.2%; width:43.5%">{active:false}</div>
+            <div class="band fresh" style="left:96.8%; width:3.2%"></div>
+          </div>
+        </div>
+        <div class="lane">
+          <div class="lane-label"><b>Overlay</b>lo que ves</div>
+          <div class="track">
+            <div class="band cover" style="left:0%; width:17.7%">portada ~11 s</div>
+            <div class="band ambient" style="left:17.7%; width:30.6%">ambiente ~19 s</div>
+            <div class="band cover" style="left:48.4%; width:17.7%">portada</div>
+            <div class="band ambient" style="left:66.1%; width:30.6%">ambiente</div>
+            <div class="band cover" style="left:96.8%; width:3.2%"></div>
+          </div>
+        </div>
+        <div class="axis">
+          <i style="left:0%">0 s</i><i style="left:16.1%">10</i><i style="left:32.3%">20</i><i style="left:48.4%">30</i><i style="left:64.5%">40</i><i style="left:80.6%">50</i><i style="left:96.8%">60 s</i>
+        </div>
+        <div class="tl-legend">
+          <span><i class="dot" style="background:var(--ok)"></i> estado fresco (pausado, activo)</span>
+          <span><i class="dot" style="background:var(--accent)"></i> portada visible</span>
+          <span><i class="dot" style="background:var(--warn)"></i> sync de la extensión</span>
+        </div>
+      </div>
+    </div>
+
+    <p class="note" style="margin-top:14px">Los tiempos exactos dependen del throttling de Safari (por eso «a veces va bien»: con Safari en primer plano el heartbeat de 1 s corre y nada caduca). El patrón, en cambio, es estructural: cualquier productor más lento que 3 s provoca el parpadeo.</p>
+
+    <div class="callout warn">
+      <p><b>La ironía:</b> el árbitro ya implementa «pausa pegajosa» — pausar una fuente no cede el overlay. Pero la pegajosidad se apoya en la señal <code>active</code> del bridge… que es justo la que parpadea. La pausa es pegajosa a nivel de <em>decisión</em> y volátil a nivel de <em>presencia</em>. Falta la regla de producto: <b>una pausa no desaparece por silencio; solo por un stop real</b>.</p>
+    </div>
+    <p class="note">Efecto secundario: los comandos (play, siguiente) que mandes durante la fase «portada» se encolan en el bridge y no llegan a la pestaña hasta el próximo sync — hasta 30 s después. El toast «Player didn't respond» lo insinúa, pero no lo explica.</p>
+  </section>
+
+  <!-- ============================================================ -->
+  <section>
+    <p class="sec-eyebrow"><b>04</b> · Bug A</p>
+    <h2 class="title">Doble clic en ambiente → ventana en blanco</h2>
+    <p>Fuera de tu red, el ambiente no debería ser alcanzable con esa cara: es el resultado de que el árbitro pinte «conectado» con datos de YouTube y de que el lanzador no sepa nada del estado del servidor.</p>
+
+    <div class="chain">
+      <div class="step">
+        <div class="n">1</div>
+        <div class="body">
+          <p>Fuera de red: el transporte Jellyfin entra en <code>.reconnecting(isOffline)</code>… pero como YouTube fue la última fuente activa, el gate <code>jellyfinIsActiveSource == false</code> descarta esa escritura. <b>Para siempre</b> (hasta relanzar la app): con todo idle, <code>decide</code> «mantiene la fuente actual», y el gate nunca vuelve a abrirse.</p>
+          <div class="chips"><span class="chip">PlayerStore.updateConnection</span><span class="chip">SourceArbiter.decide · regla 5</span></div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="n">2</div>
+        <div class="body">
+          <p>El último publish del carril loopback dejó <code>connectionState = .connected</code> — el árbitro publica <code>.connected</code> incondicionalmente para no disparar la vista «configura tu servidor». El overlay queda en ambiente: la cara de «todo bien, silencio».</p>
+          <div class="chips"><span class="chip">SourceArbiter.reevaluate</span><span class="chip">OverlayView.isAmbient</span></div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="n">3</div>
+        <div class="body">
+          <p>Clic (el gesto real es <b>un</b> clic; tu doble clic dispara el handler dos veces). <code>ClientLauncher</code> localiza la web app de Safari por host+puerto leyendo su <code>Info.plist</code> local — un match que funciona igual de bien esté el servidor vivo o muerto.</p>
+          <div class="chips"><span class="chip">NothingPlayingView.onTapGesture</span><span class="chip">ClientLauncher.findWebApp</span></div>
+        </div>
+      </div>
+      <div class="step final">
+        <div class="n">4</div>
+        <div class="body">
+          <p><b>La web app abre una URL inalcanzable → ventana en blanco.</b> Mientras, JellyBeat activa <code>anticipating</code> y se queda 30 s con el chrome visible, esperando una música que no puede llegar. Nadie te dice «estás fuera de tu red».</p>
+          <div class="chips"><span class="chip bad">resultado</span><span class="chip">PlayerStore.markAnticipating · 30 s</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="callout">
+      <p><b>A y B son el mismo agujero.</b> El ambiente representa «conectado y sin nada que mostrar», pero se llega a él desde situaciones donde ni hay conexión con el home (A) ni hay «nada» (B: hay una pausa viva detrás). Mientras «ambiente» sea un cajón de sastre, cualquier arreglo puntual moverá el bug de sitio.</p>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section>
+    <p class="sec-eyebrow"><b>05</b> · La causa de fondo</p>
+    <h2 class="title">Inventario de relojes: 18 constantes, 3 procesos, 0 contratos</h2>
+    <p>Esta es la foto del «caos». Ninguna constante es absurda por sí sola; el problema es que interactúan sin ninguna regla que las relacione. Las tres sombreadas forman el triángulo del parpadeo.</p>
+
+    <div class="tablewrap wide">
+      <table>
+        <thead>
+          <tr><th>Constante</th><th>Valor</th><th>Dónde vive</th><th>Para qué</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Heartbeat content script</td><td class="num">0.5 s / 1 s</td><td>extensión · common.js</td><td>sonando / en pausa (foreground)</td></tr>
+          <tr class="hot"><td><b>Alarma keepalive</b></td><td class="num">30 s</td><td>extensión · background.js</td><td>único pulso con Safari en 2º plano</td></tr>
+          <tr class="hot"><td><b>TTL de staleness</b></td><td class="num">3 s</td><td>YTBridge · StateStore.swift</td><td>sin sync reciente ⇒ «idle»</td></tr>
+          <tr><td>Poll del feed loopback</td><td class="num">1 s</td><td>jellybeat · LoopbackSourceFeed</td><td>lectura del bridge</td></tr>
+          <tr><td>Self-heal del bridge</td><td class="num">5 s</td><td>jellybeat · AppDelegate</td><td>relanzar YTBridge si murió</td></tr>
+          <tr class="hot"><td><b>Gracia de colapso a ambiente</b></td><td class="num">8 s</td><td>jellybeat · PlayerStore</td><td>track nil ⇒ limpiar overlay</td></tr>
+          <tr><td>Intervalo WebSocket</td><td class="num">1.5 s / 4 s</td><td>jellybeat · Coordinator</td><td>push sonando / idle</td></tr>
+          <tr><td>Reintento socket / revival</td><td class="num">2 s ×3 / 60 s</td><td>jellybeat · Coordinator</td><td>caída → polling → reintento</td></tr>
+          <tr><td>Recencia de sesión Jellyfin</td><td class="num">60 s / 180 s</td><td>jellybeat · PlayerStore.ingest</td><td>descartar sesiones fantasma (sonando / pausa)</td></tr>
+          <tr><td>Debounce de flip de fuente</td><td class="num">1 s</td><td>jellybeat · SourceArbiter</td><td>no oscilar entre dos fuentes activas</td></tr>
+          <tr><td>Ventanas optimistas</td><td class="num">1.5 / 2 / 2.5 s</td><td>jellybeat · PlayerStore</td><td>play-pause / volumen / favorito</td></tr>
+          <tr><td>Anticipating tras lanzar</td><td class="num">30 s</td><td>jellybeat · PlayerStore</td><td>chrome visible esperando música</td></tr>
+          <tr><td>Debounce de focus / cooldown</td><td class="num">1 s / 300 ms</td><td>jellybeat · PlayerStore</td><td>doble clic / comandos</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout warn" style="margin-top:20px">
+      <p><b>La regla que falta (y que rompe el triángulo):</b> un TTL de presencia debe ser ≥ 2× el heartbeat más lento posible de su productor — o la presencia debe degradarse según el <em>último estado conocido</em>, no borrarse. Hoy: TTL 3 s contra un productor que legítimamente calla 30 s. Esta regla debería vivir escrita en <code>loopback-source-abi-v1.md</code>, porque cualquier plugin de terceros va a tropezar exactamente igual.</p>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section>
+    <p class="sec-eyebrow"><b>06</b> · De paso</p>
+    <h2 class="title">Hallazgos menores</h2>
+    <ul class="plain">
+      <li><b>Gestos incoherentes:</b> en ambiente, <em>un</em> clic lanza Jellyfin (el doble clic lo dispara dos veces); sobre la portada, el <em>doble</em> clic enfoca la fuente. Dos gestos distintos para ideas hermanas, y ninguno tiene affordance visible.</li>
+      <li><b>El ambiente tiene marca fija:</b> muestra las notas y lanza <em>Jellyfin</em> aunque el contexto inmediato fuera YouTube. Coherente con «Jellyfin es home», pero nunca comunicado.</li>
+      <li><b><code>.connecting</code> sin track</b> pinta la vista ambiente dentro del chrome a tamaño completo — un estado híbrido transitorio que no coincide con ninguna de las 7 caras.</li>
+      <li><b><code>settings.sourceSelection = .auto</code> se resetea en cada arranque</b> (pin de sesión). Razonable, pero invisible: si pineaste YouTube ayer, hoy amaneces en Automático sin aviso.</li>
+    </ul>
+  </section>
+
+  <!-- ============================================================ -->
+  <section>
+    <p class="sec-eyebrow"><b>07</b> · Propuesta</p>
+    <h2 class="title">Separar los dos ejes y darle nombre a la pausa dormida</h2>
+    <p><b>Principio rector:</b> el overlay representa <em>tu última escucha</em> y se degrada con elegancia — nunca parpadea, nunca miente sobre el servidor. Para conseguirlo hay que separar lo que hoy vive fusionado en <code>connectionState</code>:</p>
+    <ul class="plain">
+      <li><b>Eje 1 — Estado de la escucha</b> (qué pinta el overlay): Vacío · Sonando · Pausado · <b>Dormido</b> (nuevo) — con la regla de que de Pausado no se sale por silencio.</li>
+      <li><b>Eje 2 — Salud del enlace home</b> (qué señaliza): OK · Reconectando · Offline · Error — visible <em>siempre</em>, incluso en ambiente, aunque la fuente activa sea otra.</li>
+    </ul>
+
+    <div class="sm">
+      <div class="sm-row">
+        <div class="sm-node">Vacío<small>ambiente</small></div>
+        <div class="sm-edge">
+          <span>una fuente empieza →</span>
+          <span>← stop confirmado · gracia 8 s</span>
+        </div>
+        <div class="sm-node">Sonando</div>
+        <div class="sm-edge">
+          <span>pausa →</span>
+          <span>← play</span>
+        </div>
+        <div class="sm-node">Pausado</div>
+        <div class="sm-edge">
+          <span>la fuente calla →</span>
+          <span>← vuelve el heartbeat</span>
+        </div>
+        <div class="sm-node new">Dormido<small>nuevo</small></div>
+      </div>
+      <div class="sm-return">Dormido → Vacío solo por cierre real o timeout largo (~30 min) — nunca por silencio.</div>
+      <div class="sm-notes">
+        <div class="sm-note"><b>Dormido:</b> portada atenuada + zzz. El clic despierta la fuente (focusTab), no lanza Jellyfin. Es la transición que hoy no existe y que causa el parpadeo: una pausa que calla debe atenuarse, no destruirse.</div>
+        <div class="sm-note"><b>Vacío con el home caído:</b> badge offline («Jellyfin unreachable») y el clic no abre la web app. El eje 2 sigue visible en todas las caras.</div>
+      </div>
+    </div>
+
+    <h3>Cambios concretos, en orden</h3>
+    <div class="fixes">
+      <div class="fix">
+        <div class="rank">1</div>
+        <div>
+          <h4>Staleness según estado en el bridge</h4>
+          <p>En <code>StateStore</code>: si el último estado era <b>paused</b>, seguir sirviéndolo como activo (con un campo <code>staleMs</code>) durante un TTL largo (~30 min). Servir <code>{active:false}</code> a los 3 s solo si el último estado era <b>playing</b> — un tab que sonaba y calló sí es un cierre real. Mata el parpadeo en la raíz.</p>
+          <div class="chips"><span class="chip">yt-safari-bridge · StateStore.swift</span><span class="chip ok">impacto alto</span><span class="chip ok">esfuerzo bajo</span></div>
+        </div>
+      </div>
+      <div class="fix">
+        <div class="rank">2</div>
+        <div>
+          <h4>Gracia de colapso asimétrica en JellyBeat</h4>
+          <p>En <code>PlayerStore.apply</code>: si el último snapshot visible estaba <b>en pausa</b>, la gracia pasa de 8 s a minutos (o hasta stop explícito); los 8 s se quedan solo para «sonaba y desapareció». Defensa en profundidad: protege también frente a plugins de terceros con el mismo vicio.</p>
+          <div class="chips"><span class="chip">jellybeat · PlayerStore.swift</span><span class="chip ok">impacto alto</span><span class="chip ok">esfuerzo bajo</span></div>
+        </div>
+      </div>
+      <div class="fix">
+        <div class="rank">3</div>
+        <div>
+          <h4>Ambiente honesto (arregla la ventana en blanco)</h4>
+          <p>Exponer en <code>PlayerStore</code> una señal <em>no gateada</em> del enlace Jellyfin. En ambiente, si el home está caído: badge «Jellyfin fuera de alcance», y el clic no lanza la web app (o lanza con aviso). <code>anticipating</code> solo se activa si el enlace está vivo.</p>
+          <div class="chips"><span class="chip">jellybeat · PlayerStore + NothingPlayingView</span><span class="chip ok">impacto alto</span><span class="chip warn">esfuerzo medio</span></div>
+        </div>
+      </div>
+      <div class="fix">
+        <div class="rank">4</div>
+        <div>
+          <h4>Con todo idle, la representación vuelve a home</h4>
+          <p>Regla 5 de <code>decide</code>: con nada activo en ningún sitio, volver a Jellyfin en vez de «mantener la fuente actual». Así el gate se reabre y el overlay vuelve a contar la verdad del servidor (Reconnecting / You're offline). Requiere 1+2 primero para no reintroducir flapping.</p>
+          <div class="chips"><span class="chip">jellybeat · SourceArbiter.decide + tests</span><span class="chip warn">impacto medio</span><span class="chip ok">esfuerzo bajo</span></div>
+        </div>
+      </div>
+      <div class="fix">
+        <div class="rank">5</div>
+        <div>
+          <h4>Unificar gestos y escribir el contrato de relojes</h4>
+          <p>Un clic = abrir/traer el home; doble clic = enfocar la fuente activa — en todas las caras del overlay, con tooltip en hover. Y documentar en <code>loopback-source-abi-v1.md</code> la regla de staleness/pausa para que los plugins no hereden el bug.</p>
+          <div class="chips"><span class="chip">jellybeat · overlay + docs ABI</span><span class="chip warn">impacto medio</span><span class="chip ok">esfuerzo bajo</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p><b>Por dónde empezaría:</b> 1 + 2 son un par pequeño y quirúrgico que elimina el parpadeo aunque solo aterrice uno de los dos repos; 3 arregla la ventana en blanco; 4 y 5 consolidan el modelo. Con eso, el journey queda definido por reglas — pausa pegajosa de verdad, ambiente honesto, y una sola semántica por estado — en vez de por la coincidencia de tres relojes.</p>
+    <p style="margin-top:10px">Auditoría del 18 de julio de 2026, generada leyendo <span class="mono">jellybeat</span> (main @ f6d94e6) y <span class="mono">yt-safari-bridge</span> en local. Los prompts de implementación viven en <span class="mono">2026-07-18-listening-journey-prompts.md</span>.</p>
+  </footer>
+</div>
+</body>
+</html>
