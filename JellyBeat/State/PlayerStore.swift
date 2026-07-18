@@ -213,18 +213,37 @@ final class PlayerStore {
     /// command queues, the next Safari sync (≤1 s) clicks the button, and the
     /// following now-playing read carries the new `liked`.
     private static let optimisticFavoriteWindow: TimeInterval = 2.5
-    /// How long to wait before clearing `currentTrack` when a poll reports no
-    /// active track. Smooths over the brief gap between songs while the web
-    /// player loads the next one.
-    private static let trackClearDebounce: UInt64 = 1_500_000_000
+    /// How long the overlay holds the last track after playback stops, before
+    /// clearing it and collapsing to the ambient note.
+    ///
+    /// This is an absolute deadline, armed on the *first* update that reports
+    /// nothing playing and deliberately not restarted by the ones that follow.
+    /// Every source keeps reporting while idle (the loopback feed every 1 s,
+    /// Jellyfin every `refreshRate`), so a per-update restart pushes the
+    /// deadline out of reach forever and strands a dead track on screen.
+    ///
+    /// Sized above the longest gap that is *not* a real stop: the bridge's 5 s
+    /// self-heal (`AppDelegate`), the 5 s ceiling of the refresh-rate slider,
+    /// the socket's 4 s idle push, and navigation between videos. Below that
+    /// the overlay collapses and re-expands over gaps the next poll was about
+    /// to fill; far above it the collapse stops reading as a consequence of
+    /// having stopped playback.
+    static let defaultIdleCollapseGrace: TimeInterval = 8
     private static let selectedSessionKey = "playerStore.selectedSessionId"
 
     /// Injected so the hosted test runner reads/writes a throwaway suite rather
     /// than the user's real `.standard` domain. Production passes `.standard`.
     private let defaults: UserDefaults
+    /// Injected so tests can exercise the collapse without sleeping for the
+    /// real grace period. Production takes `defaultIdleCollapseGrace`.
+    private let idleCollapseGrace: TimeInterval
 
-    init(defaults: UserDefaults = .standard) {
+    init(
+        defaults: UserDefaults = .standard,
+        idleCollapseGrace: TimeInterval = PlayerStore.defaultIdleCollapseGrace
+    ) {
         self.defaults = defaults
+        self.idleCollapseGrace = idleCollapseGrace
         self.selectedSessionId = defaults.string(forKey: Self.selectedSessionKey)
     }
 
@@ -287,9 +306,10 @@ final class PlayerStore {
 
         // Track transition smoothing: a new track cancels any pending clear
         // so we go straight from A to B (fade through ArtworkView). A nil
-        // track only takes effect after `trackClearDebounce` to absorb the
-        // gap during which the web player has unloaded A and not yet
-        // started B.
+        // track only takes effect after `idleCollapseGrace`, which absorbs
+        // both the gap where the player has unloaded A and not yet started B,
+        // and the transient stops (bridge restart, tab navigation, a source
+        // handing over) that aren't the user actually stopping playback.
         if let track {
             clearTrackTask?.cancel()
             clearTrackTask = nil
@@ -324,14 +344,20 @@ final class PlayerStore {
                 // already delivers a trusted `liked` in the snapshot above.
                 if !trustFavorite { refreshFavorite(for: track.itemId) }
             }
-        } else if currentTrack != nil {
-            clearTrackTask?.cancel()
+        } else if currentTrack != nil, clearTrackTask == nil {
+            // Arm once, and let it run to the deadline. Re-arming on the
+            // updates that follow is what kept a stopped track on screen
+            // indefinitely: sources report "nothing playing" faster than the
+            // grace period, so each one reset a timer that then never fired.
+            // Resuming playback is what cancels it, in the branch above.
+            let grace = UInt64(idleCollapseGrace * 1_000_000_000)
             clearTrackTask = Task { @MainActor [weak self] in
-                try? await Task.sleep(nanoseconds: Self.trackClearDebounce)
+                try? await Task.sleep(nanoseconds: grace)
                 guard !Task.isCancelled else { return }
                 self?.currentTrack = nil
                 self?.queue = []
                 self?.resetInstantMix()
+                self?.clearTrackTask = nil
             }
         }
     }
