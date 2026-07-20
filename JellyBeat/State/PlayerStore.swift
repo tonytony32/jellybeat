@@ -248,6 +248,22 @@ final class PlayerStore {
     /// wide margin, still bounded so a tab closed while paused eventually
     /// collapses instead of stranding a track for the session.
     static let defaultPausedIdleCollapseGrace: TimeInterval = 600
+    /// How long the overlay holds the last track after the *link* drops, before
+    /// giving up on it and collapsing to ambient.
+    ///
+    /// `.reconnecting` deliberately keeps the track (dimmed, badged) so a blip
+    /// doesn't blank the overlay mid-song — but that hold needs a deadline, and
+    /// nothing else can supply one. The graces above are armed from
+    /// `apply(track: nil)`, which only runs when the server *answers*; an
+    /// unreachable server never answers, so a link that stays down stranded a
+    /// dead cover on screen until the app was relaunched. Worse after the
+    /// fall-back-home change: a loopback source going away hands the overlay to
+    /// Jellyfin without publishing its own "nothing playing", so an unreachable
+    /// Jellyfin left a *YouTube* ghost pinned under a Jellyfin badge.
+    ///
+    /// 60 s is two full cycles of the poller's 30 s backoff cap — by then
+    /// several retries have missed, so this is an outage rather than a blip.
+    static let defaultReconnectHoldGrace: TimeInterval = 60
     private static let selectedSessionKey = "playerStore.selectedSessionId"
 
     /// Injected so the hosted test runner reads/writes a throwaway suite rather
@@ -257,15 +273,18 @@ final class PlayerStore {
     /// real grace period. Production takes `defaultIdleCollapseGrace`.
     private let idleCollapseGrace: TimeInterval
     private let pausedIdleCollapseGrace: TimeInterval
+    private let reconnectHoldGrace: TimeInterval
 
     init(
         defaults: UserDefaults = .standard,
         idleCollapseGrace: TimeInterval = PlayerStore.defaultIdleCollapseGrace,
-        pausedIdleCollapseGrace: TimeInterval = PlayerStore.defaultPausedIdleCollapseGrace
+        pausedIdleCollapseGrace: TimeInterval = PlayerStore.defaultPausedIdleCollapseGrace,
+        reconnectHoldGrace: TimeInterval = PlayerStore.defaultReconnectHoldGrace
     ) {
         self.defaults = defaults
         self.idleCollapseGrace = idleCollapseGrace
         self.pausedIdleCollapseGrace = pausedIdleCollapseGrace
+        self.reconnectHoldGrace = reconnectHoldGrace
         self.selectedSessionId = defaults.string(forKey: Self.selectedSessionKey)
     }
 
@@ -374,23 +393,30 @@ final class PlayerStore {
                 if !trustFavorite { refreshFavorite(for: track.itemId) }
             }
         } else if currentTrack != nil, clearTrackTask == nil {
-            // Arm once, and let it run to the deadline. Re-arming on the
-            // updates that follow is what kept a stopped track on screen
-            // indefinitely: sources report "nothing playing" faster than the
-            // grace period, so each one reset a timer that then never fired.
-            // Resuming playback is what cancels it, in the branch above.
             // Asymmetric by what was last on screen: 8 s says "it was playing
             // and it's gone", which a paused track has not done.
-            let seconds = self.isPaused ? pausedIdleCollapseGrace : idleCollapseGrace
-            let grace = UInt64(seconds * 1_000_000_000)
-            clearTrackTask = Task { @MainActor [weak self] in
-                try? await Task.sleep(nanoseconds: grace)
-                guard !Task.isCancelled else { return }
-                self?.currentTrack = nil
-                self?.queue = []
-                self?.resetInstantMix()
-                self?.clearTrackTask = nil
-            }
+            armTrackCollapse(after: self.isPaused ? pausedIdleCollapseGrace : idleCollapseGrace)
+        }
+    }
+
+    /// Schedule the single "clear the last track" deadline, shared by the two
+    /// reasons a track stops being real: the source reported nothing (above), or
+    /// the link went down and stayed down (`updateConnection`).
+    ///
+    /// Every caller guards on `clearTrackTask == nil` so it is armed once and
+    /// runs to the deadline. Re-arming on the updates that follow is what kept a
+    /// stopped track on screen indefinitely: sources report "nothing playing"
+    /// faster than the grace period, so each one reset a timer that then never
+    /// fired. Playback resuming is what cancels it, in `apply`.
+    private func armTrackCollapse(after seconds: TimeInterval) {
+        let grace = UInt64(seconds * 1_000_000_000)
+        clearTrackTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: grace)
+            guard !Task.isCancelled else { return }
+            self?.currentTrack = nil
+            self?.queue = []
+            self?.resetInstantMix()
+            self?.clearTrackTask = nil
         }
     }
 
@@ -433,15 +459,22 @@ final class PlayerStore {
         // no-op assignment so we don't churn the Observation graph.
         guard connectionState != state else { return }
         connectionState = state
-        // A hard error wipes the now-playing context (it isn't coming back
-        // without user action). `.reconnecting` deliberately does NOT: the
-        // overlay keeps the last track dimmed so the user has continuity while
-        // the link heals on its own.
+        // A hard error wipes the now-playing context immediately (it isn't
+        // coming back without user action). `.reconnecting` keeps the last
+        // track dimmed instead, so a blip doesn't blank the overlay mid-song —
+        // but on a deadline, because "while the link heals on its own" has no
+        // upper bound and a link that never heals stranded a dead cover on
+        // screen for the rest of the session.
         if case .error = state {
             currentTrack = nil
             isPaused = false
             queue = []
             resetInstantMix()
+        } else if case .reconnecting = state, currentTrack != nil, clearTrackTask == nil {
+            // Armed once, on the edge into `.reconnecting`. Re-entering with a
+            // different `isOffline` passes the guard above but finds the task
+            // already armed, so the deadline never slides.
+            armTrackCollapse(after: reconnectHoldGrace)
         }
     }
 
@@ -452,6 +485,26 @@ final class PlayerStore {
     var isLinkLive: Bool {
         if case .connected = connectionState { return true }
         return false
+    }
+
+    /// True when the overlay should shrink to its ambient footprint: there is
+    /// nothing to render, and the transport is either healthy or still retrying.
+    ///
+    /// Single source of truth for both halves of "ambient" — `OverlayView` picks
+    /// the content, `OverlayWindowController` sizes the window, and the two must
+    /// agree or the window is one size while the content expects another.
+    ///
+    /// `.reconnecting` counts. Once the hold deadline has cleared the track
+    /// there is nothing left to say beyond "we can't reach home" — which the
+    /// ambient glyph already says, rendering a crossed-out wifi symbol off
+    /// `jellyfinLinkHealth`. Showing a full-size "Lost connection" card instead
+    /// left a big, permanent alarm on screen for as long as you were away.
+    var showsAmbient: Bool {
+        guard currentTrack == nil else { return false }
+        switch connectionState {
+        case .connected, .reconnecting: return true
+        case .idle, .connecting, .error: return false
+        }
     }
 
     /// Apply a fresh `[Session]` from any source (polling or WebSocket).

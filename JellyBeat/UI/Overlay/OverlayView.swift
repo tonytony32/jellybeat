@@ -17,12 +17,7 @@ struct OverlayView: View {
     /// and contents fade together.
     @State private var ambientHover: Bool = false
 
-    private var isAmbient: Bool {
-        if case .connected = player.connectionState, player.currentTrack == nil {
-            return true
-        }
-        return false
-    }
+    private var isAmbient: Bool { player.showsAmbient }
 
     /// True while the Minim strip itself is on screen (a track is rendering). In
     /// that state Minim owns its whole card — a glass panel whose height animates
@@ -142,8 +137,6 @@ struct OverlayView: View {
             IdleStateView(openSettings: openSettings)
         case .error(let message):
             ErrorStateView(message: message, openSettings: openSettings)
-        case .reconnecting(let isOffline) where player.currentTrack == nil:
-            ReconnectingStateView(isOffline: isOffline)
         case .connecting, .connected, .reconnecting:
             if let track = player.currentTrack {
                 themes.current.body(track: track, store: player)
@@ -253,34 +246,6 @@ private struct ReconnectingBadge: View {
             Capsule().fill(.ultraThinMaterial)
                 .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 1)
         }
-    }
-}
-
-/// Shown when the link drops while nothing is playing (no track to dim). Gentle
-/// on purpose: this is a transient, self-healing state, so — unlike
-/// `ErrorStateView` — there's no red triangle and no "Open Settings" (the
-/// config is fine; the server is just temporarily unreachable).
-private struct ReconnectingStateView: View {
-    let isOffline: Bool
-
-    var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: isOffline ? "wifi.slash" : "antenna.radiowaves.left.and.right.slash")
-                .font(.system(size: 26, weight: .light))
-                .foregroundStyle(.secondary)
-            Text(isOffline ? "You're offline" : "Lost connection to the server")
-                .font(.callout)
-                .multilineTextAlignment(.center)
-            HStack(spacing: 6) {
-                ProgressView()
-                    .controlSize(.small)
-                    .scaleEffect(0.8)
-                Text("Reconnecting…")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(20)
     }
 }
 

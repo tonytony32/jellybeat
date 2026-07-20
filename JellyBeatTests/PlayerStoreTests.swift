@@ -250,8 +250,9 @@ struct PlayerStoreTests {
     // MARK: - Reconnecting / link-down behaviour
 
     /// Dropping into `.reconnecting` must KEEP the last track on screen (unlike
-    /// `.error`, which wipes it) so the overlay can dim it and recover in place
-    /// when the server comes back.
+    /// `.error`, which wipes it immediately) so the overlay can dim it and
+    /// recover in place when the server comes back. The hold is bounded — see
+    /// `PlayerStoreIdleCollapseTests` for the deadline that ends it.
     @Test
     func reconnectingPreservesCurrentTrack() {
         let store = PlayerStore()

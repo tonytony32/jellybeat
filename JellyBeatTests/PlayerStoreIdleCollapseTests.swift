@@ -19,11 +19,15 @@ struct PlayerStoreIdleCollapseTests {
     /// "hasn't collapsed yet" assertion past the short deadline is meaningful,
     /// but still short enough to wait out in a test.
     private static let pausedGrace: TimeInterval = 2.4
+    /// Stands in for the 60 s production value. Deliberately distinct from both
+    /// graces above so a collapse can be attributed to the deadline that fired.
+    private static let reconnectGrace: TimeInterval = 1.2
 
     private func makeStore() -> PlayerStore {
         PlayerStore(
             idleCollapseGrace: Self.grace,
-            pausedIdleCollapseGrace: Self.pausedGrace
+            pausedIdleCollapseGrace: Self.pausedGrace,
+            reconnectHoldGrace: Self.reconnectGrace
         )
     }
 
@@ -199,5 +203,80 @@ struct PlayerStoreIdleCollapseTests {
 
         #expect(store.currentTrack == nil)
         #expect(store.queue.isEmpty)
+    }
+
+    // MARK: - Link-down hold
+
+    /// The reported bug, in its worst shape. A YouTube track is on screen when
+    /// the bridge goes away; the arbiter hands the overlay home to Jellyfin,
+    /// which is unreachable (off the home network). Nothing can ever call
+    /// `apply(track: nil)` — that needs the server to *answer* — so before the
+    /// hold deadline the dead cover sat there dimmed under a "Reconnecting…"
+    /// badge until the app was relaunched.
+    @Test
+    func linkDownEventuallyCollapsesAGhostFromADepartedSource() async {
+        let store = makeStore()
+
+        // A loopback source is driving: Jellyfin is gated out.
+        store.jellyfinIsActiveSource = false
+        publish(store, track: track(id: "yt-1"))
+        #expect(store.currentTrack != nil)
+
+        // The source goes away and the arbiter falls back home, reopening
+        // Jellyfin's gate — onto a link that can't be reached.
+        store.jellyfinIsActiveSource = true
+        store.updateConnection(.reconnecting(isOffline: false))
+        // The poller keeps retrying and re-emitting for as long as it's down.
+        for _ in 0..<3 {
+            await wait(0.15)
+            store.updateConnection(.reconnecting(isOffline: false))
+        }
+        #expect(store.currentTrack != nil, "the hold is the point — don't blank mid-blip")
+
+        await wait(Self.reconnectGrace)
+
+        #expect(store.currentTrack == nil)
+        #expect(store.queue.isEmpty)
+        // The pair the overlay reads to shrink to the ambient glyph, which
+        // renders the crossed-out wifi symbol off `jellyfinLinkHealth`.
+        #expect(store.showsAmbient == true)
+        #expect(store.isLinkLive == false)
+    }
+
+    /// The hold earning its keep: a link that comes back inside the window
+    /// recovers *in place*, with the same track and no flicker through ambient.
+    @Test
+    func linkRecoveringWithinTheHoldKeepsTheTrack() async {
+        let store = makeStore()
+        publish(store, track: track(id: "a"))
+
+        store.updateConnection(.reconnecting(isOffline: false))
+        await wait(Self.reconnectGrace / 2)
+        // A successful tick: the transport answers again with the same track.
+        publish(store, track: track(id: "a"))
+
+        // Well past the original deadline — a surviving timer would wipe it.
+        await wait(Self.reconnectGrace + 0.3)
+        #expect(store.currentTrack?.itemId == "a")
+        #expect(store.isLinkLive == true)
+    }
+
+    /// Losing the network *while* reconnecting flips `isOffline`, which is a
+    /// distinct `ConnectionState` and so re-enters the branch that arms the
+    /// hold. It must not re-arm: a link that degrades on a timer would push the
+    /// deadline out of reach exactly like the repeated idle reports above.
+    @Test
+    func theOfflineFlipDoesNotSlideTheHoldDeadline() async {
+        let store = makeStore()
+        publish(store, track: track(id: "a"))
+
+        store.updateConnection(.reconnecting(isOffline: false))
+        await wait(Self.reconnectGrace * 0.75)
+        store.updateConnection(.reconnecting(isOffline: true))
+
+        // Only a little past the *original* deadline. Re-arming would have
+        // bought another full grace and left the track on screen.
+        await wait(Self.reconnectGrace * 0.5)
+        #expect(store.currentTrack == nil)
     }
 }
