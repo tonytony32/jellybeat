@@ -23,6 +23,17 @@ A run of fixes from the 2026-07-18 listening-journey UX audit
   falls back to Jellyfin rather than parking on the source that went away, so
   the connection state you see is the server's real one again — previously it
   could sit on a cheerful "connected" until you relaunched the app.
+- **"Reconnecting…" no longer lasts forever.** A dropped link kept the last
+  track on screen, dimmed, with a spinning badge — and nothing ever ended it,
+  because the only thing that clears a track needs the server to answer, and an
+  unreachable server never does. Leave the house mid-song and you came back to
+  a dead cover frozen on the overlay until you relaunched. The overlay now
+  holds it for a minute (long enough to ride out a blip and recover in place),
+  then shrinks back to the ambient glyph, which already says the server is out
+  of reach. Worst case was a cover from the *YouTube bridge* pinned under a
+  *Jellyfin* badge: when a source goes away the overlay falls back home, and if
+  home was unreachable the departed source's artwork had nothing left to clear
+  it.
 - **Gestures mean one thing each.** A single click on the ambient glyph opens
   your Jellyfin client; a double click on the artwork goes to the active
   source's own window. Each gesture now hovers with a tooltip explaining

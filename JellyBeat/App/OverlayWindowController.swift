@@ -363,9 +363,11 @@ final class OverlayWindowController: NSObject {
         }
     }
 
-    /// Shrink the overlay to artwork-size when the server is reachable but
-    /// nothing is playing, so the floating window stays out of the way until
-    /// the user wants it. Restores full layout once a track starts.
+    /// Shrink the overlay to artwork-size when there is nothing playing, so the
+    /// floating window stays out of the way until the user wants it. Restores
+    /// full layout once a track starts. `PlayerStore.showsAmbient` decides,
+    /// which also covers a link that has been down long enough to give up on
+    /// the last track.
     ///
     /// We track `currentTrack` (the observation framework can't observe the
     /// derived `isInAmbientMode` without reading its inputs), but only act when
@@ -391,12 +393,7 @@ final class OverlayWindowController: NSObject {
         }
     }
 
-    private var isInAmbientMode: Bool {
-        if case .connected = player.connectionState, player.currentTrack == nil {
-            return true
-        }
-        return false
-    }
+    private var isInAmbientMode: Bool { player.showsAmbient }
 
     /// Resize and reposition the overlay across transitions (theme change,
     /// full → ambient, ambient → full).
